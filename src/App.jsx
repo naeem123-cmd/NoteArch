@@ -28,8 +28,9 @@ import {
   Languages,
   Pencil,
   Share2,
+  LogOut,
 } from "lucide-react";
-import { supabase } from "./supabaseClient";
+import { supabase, supabaseConfigured } from "./supabaseClient";
 
 const fmtDate = (iso) =>
   new Date(iso).toLocaleString("en-IN", {
@@ -127,6 +128,18 @@ export default function App() {
   const [showAddProject, setShowAddProject] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [tab, setTab] = useState("notes");
+  const [userEmail, setUserEmail] = useState("");
+  const [isRestricted, setIsRestricted] = useState(false);
+
+  useEffect(() => {
+    supabase.auth.getUser().then(async ({ data }) => {
+      setUserEmail(data?.user?.email || "");
+      if (data?.user) {
+        const { data: profile } = await supabase.from("profiles").select("project_id").eq("id", data.user.id).single();
+        setIsRestricted(Boolean(profile?.project_id));
+      }
+    });
+  }, []);
 
   const loadAll = async () => {
     setLoading(true);
@@ -241,11 +254,18 @@ export default function App() {
                 placeholder="Project name" style={{ flex: 1, fontSize: 13, padding: "7px 10px", border: "1px solid var(--line)", borderRadius: 10, outline: "none", background: "#fff" }} />
               <button onClick={addProject} style={{ background: "var(--ink)", color: "#fff", border: "none", borderRadius: 10, padding: "0 12px", fontSize: 12, fontWeight: 600 }}>Add</button>
             </div>
-          ) : (
+          ) : !isRestricted ? (
             <button onClick={() => setShowAddProject(true)} style={{ display: "flex", alignItems: "center", gap: 7, background: "transparent", border: "none", color: "var(--purple)", fontSize: 13, fontWeight: 600, padding: "9px 10px", width: "100%", borderRadius: 10 }}>
               <FolderPlus size={15} /> New project
             </button>
-          )}
+          ) : null}
+        </div>
+
+        <div style={{ padding: "12px 16px", borderTop: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span style={{ fontSize: 11.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{userEmail}</span>
+          <button onClick={() => supabase.auth.signOut()} style={{ background: "none", border: "none", color: "var(--muted)", display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, fontWeight: 600, flexShrink: 0 }}>
+            <LogOut size={13} /> Sign out
+          </button>
         </div>
       </aside>
 
@@ -290,6 +310,12 @@ export default function App() {
             </button>
           ))}
         </div>
+
+        {!supabaseConfigured && (
+          <div style={{ background: "var(--yellow-soft)", color: "#8a5a2b", fontSize: 12.5, padding: "10px 24px", margin: "12px 24px 0", borderRadius: 12, fontWeight: 600 }}>
+            Setup incomplete: VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY aren't set. Add them in Vercel → Settings → Environment Variables, then redeploy.
+          </div>
+        )}
 
         {loadError && (
           <div style={{ background: "var(--coral-soft)", color: "#b23b3b", fontSize: 12.5, padding: "8px 24px", margin: "12px 24px 0", borderRadius: 12 }}>
