@@ -79,6 +79,11 @@ function noteAsText(note, projectName) {
     note.decisions.forEach((d) => lines.push(`- ${d}`));
     lines.push("");
   }
+  if ((note.requirements || []).length) {
+    lines.push("Requirements:");
+    note.requirements.forEach((r) => lines.push(`- ${r}`));
+    lines.push("");
+  }
   if ((note.action_items || []).length) {
     lines.push("Action items:");
     note.action_items.forEach((a) => lines.push(`- ${a.task}${a.owner ? ` (${a.owner})` : ""}`));
@@ -97,7 +102,7 @@ function downloadNoteAsText(note, projectName) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = `${projectName.replace(/\s+/g, "-")}-note-${new Date(note.created_at).toISOString().slice(0, 10)}.txt`;
+  a.download = `${projectName.replace(/\s+/g, "-")}-MOM-${new Date(note.created_at).toISOString().slice(0, 10)}.txt`;
   a.click();
   URL.revokeObjectURL(url);
 }
@@ -232,13 +237,14 @@ export default function App() {
           <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 4 }}>Site & client discussion log</div>
         </div>
 
-        <div style={{ padding: "2px 16px 10px", display: "flex", gap: 8 }}>
-          <TabBtn active={tab === "notes"} onClick={() => setTab("notes")} icon={<LayoutList size={13} />} label="Notes" />
-          <TabBtn active={tab === "tasks"} onClick={() => setTab("tasks")} icon={<ClipboardList size={13} />} label="Tasks" badge={stats.pendingTasks || null} />
+        <div style={{ padding: "2px 16px 10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 10px", borderRadius: 12, background: "var(--purple-soft)", color: "var(--purple)", fontSize: 13.5, fontWeight: 700 }}>
+            <ClipboardList size={14} /> Meetings / MOMs
+          </div>
         </div>
 
         <div style={{ padding: "4px 14px", flex: 1, overflowY: "auto" }}>
-          <SidebarItem label="All notes" count={notes.length} active={activeProject === "All"} onClick={() => { setActiveProject("All"); setSidebarOpen(false); }} />
+          <SidebarItem label="All MOMs" count={notes.length} active={activeProject === "All"} onClick={() => { setActiveProject("All"); setSidebarOpen(false); }} />
           <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-soft)", padding: "16px 10px 6px", letterSpacing: "0.04em" }}>PROJECTS</div>
           {projects.map((p) => {
             const c = colorFor(p.name);
@@ -279,7 +285,7 @@ export default function App() {
             <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search notes, projects, tags..." style={{ border: "none", outline: "none", flex: 1, fontSize: 14, background: "transparent" }} />
           </div>
           <button className="desktop-new-btn display" onClick={() => setShowRecorder(true)} style={{ background: "var(--purple-grad)", color: "#fff", border: "none", borderRadius: 14, padding: "11px 18px", fontSize: 14, fontWeight: 700, display: "flex", alignItems: "center", gap: 7, whiteSpace: "nowrap", boxShadow: "0 8px 18px rgba(124,92,252,0.35)" }}>
-            <Mic size={16} /> New note
+            <Mic size={16} /> New Meeting
           </button>
         </div>
 
@@ -291,10 +297,10 @@ export default function App() {
           </svg>
           <div className="display" style={{ fontSize: 20, fontWeight: 800 }}>{greeting()} 👋</div>
           <div style={{ fontSize: 13, opacity: 0.9, marginTop: 3 }}>
-            {stats.totalNotes} notes captured · {stats.decisionsThisWeek} decisions this week
+            {stats.totalNotes} meetings captured · {stats.decisionsThisWeek} decisions this week
           </div>
           <div style={{ display: "flex", gap: 18, marginTop: 16 }}>
-            <HeroStat value={stats.pendingTasks} label="Pending tasks" />
+            <HeroStat value={stats.pendingTasks} label="Open actions" />
             <HeroStat value={stats.activeProjects} label="Projects" />
             <HeroStat value={stats.decisionsThisWeek} label="Decisions" />
           </div>
@@ -302,7 +308,7 @@ export default function App() {
 
         <div className="pill-tabs">
           <button className={`pill ${activeProject === "All" ? "active" : ""}`} onClick={() => setActiveProject("All")}>
-            All notes <span style={{ opacity: 0.6 }}>{notes.length}</span>
+            All MOMs <span style={{ opacity: 0.6 }}>{notes.length}</span>
           </button>
           {projects.map((p) => (
             <button key={p.id} className={`pill ${activeProject === p.name ? "active" : ""}`} onClick={() => setActiveProject(p.name)}>
@@ -326,26 +332,8 @@ export default function App() {
         <div className="main-scroll" style={{ flex: 1, overflowY: "auto", padding: "16px 24px 28px" }}>
           {loading ? (
             <EmptyState icon={<Loader2 className="spin" size={22} />} text="Loading your notes..." />
-          ) : tab === "tasks" ? (
-            allTasks.length === 0 ? (
-              <EmptyState icon={<Sparkles size={22} color="var(--muted-soft)" />} text="No action items yet." />
-            ) : (
-              <div className="notes-grid">
-                {allTasks.map((t, i) => (
-                  <div key={i} className="note-card fade-up" style={{ display: "flex", gap: 12, alignItems: "flex-start" }}>
-                    <button onClick={() => toggleActionItem(t.note, t.idx)} style={{ background: "none", border: "none", padding: 2, color: t.done ? "var(--green)" : "var(--muted-soft)" }}>
-                      {t.done ? <CheckCircle2 size={19} /> : <Circle size={19} />}
-                    </button>
-                    <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 14, textDecoration: t.done ? "line-through" : "none", color: t.done ? "var(--muted-soft)" : "var(--ink)" }}>{t.task}</div>
-                      <div style={{ fontSize: 12, color: "var(--muted)", marginTop: 3 }}>{t.projName} {t.owner ? `· ${t.owner}` : ""} · {fmtDate(t.note.created_at)}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )
           ) : filteredNotes.length === 0 ? (
-            <EmptyState icon={<Sparkles size={22} color="var(--muted-soft)" />} text={notes.length === 0 ? "No notes yet. Tap + to record your first discussion." : "No notes match this search."} />
+            <EmptyState icon={<Sparkles size={22} color="var(--muted-soft)" />} text={notes.length === 0 ? "No MOMs yet. Start your first client or site meeting." : "No notes match this search."} />
           ) : (
             <div className="notes-grid">
               {filteredNotes.map((n) => (
@@ -357,19 +345,13 @@ export default function App() {
           )}
         </div>
 
-        <button className="fab" onClick={() => setShowRecorder(true)} title="New note">
+        <button className="fab" onClick={() => setShowRecorder(true)} title="New Meeting">
           <Plus size={26} strokeWidth={2.5} />
         </button>
 
         <div className="bottom-nav">
-          <button onClick={() => setTab("notes")} style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: tab === "notes" ? "var(--purple)" : "var(--muted-soft)" }}>
-            <LayoutList size={20} />
-            <span style={{ fontSize: 10, fontWeight: 600 }}>Notes</span>
-          </button>
-          <button onClick={() => setTab("tasks")} style={{ background: "none", border: "none", display: "flex", flexDirection: "column", alignItems: "center", gap: 3, color: tab === "tasks" ? "var(--purple)" : "var(--muted-soft)", position: "relative" }}>
-            <ClipboardList size={20} />
-            <span style={{ fontSize: 10, fontWeight: 600 }}>Tasks</span>
-            {stats.pendingTasks > 0 && <span style={{ position: "absolute", top: -2, right: -8, background: "var(--coral)", color: "#fff", fontSize: 9, borderRadius: 8, padding: "1px 5px" }}>{stats.pendingTasks}</span>}
+          <button onClick={() => setShowRecorder(true)} style={{ background: "var(--purple-grad)", color: "#fff", border: "none", borderRadius: 14, padding: "11px 20px", display: "flex", alignItems: "center", gap: 7, fontWeight: 700, boxShadow: "0 8px 18px rgba(124,92,252,0.25)" }}>
+            <Mic size={17} /> New Meeting
           </button>
         </div>
       </div>
@@ -429,6 +411,7 @@ function EmptyState({ icon, text }) {
 
 function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleAction, onSaveEdit }) {
   const decisions = note.decisions || [];
+  const requirements = note.requirements || [];
   const actionItems = note.action_items || [];
   const tags = note.tags || [];
   const c = colorFor(projectName);
@@ -440,7 +423,8 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
     setDraft({
       summary: note.summary || "",
       decisions: (note.decisions || []).join("\n"),
-      actionItems: (note.action_items || []).map((a) => `${a.task}${a.owner ? ` | ${a.owner}` : ""}`).join("\n"),
+      requirements: (note.requirements || []).join("\n"),
+      actionItems: (note.action_items || []).map((a) => `${a.task}${a.owner ? ` | ${a.owner}` : ""}${a.deadline ? ` | ${a.deadline}` : ""}`).join("\n"),
     });
     setEditing(true);
   };
@@ -452,11 +436,12 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
       .map((s) => s.trim())
       .filter(Boolean)
       .map((line) => {
-        const [task, owner] = line.split("|").map((x) => x.trim());
+        const [task, owner, deadline] = line.split("|").map((x) => x.trim());
         const existing = (note.action_items || []).find((a) => a.task === task);
-        return { task, owner: owner || "", done: existing?.done || false };
+        return { task, owner: owner || "", deadline: deadline || "", done: existing?.done || false };
       });
-    await onSaveEdit(note.id, { summary: draft.summary, decisions: newDecisions, action_items: newActionItems });
+    const newRequirements = draft.requirements.split("\n").map((s) => s.trim()).filter(Boolean);
+    await onSaveEdit(note.id, { summary: draft.summary, decisions: newDecisions, requirements: newRequirements, action_items: newActionItems });
     setEditing(false);
   };
 
@@ -510,7 +495,11 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
                 <textarea value={draft.decisions} onChange={(e) => setDraft({ ...draft, decisions: e.target.value })} rows={3}
                   style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit" }} />
               </Section>
-              <Section title="Edit action items (one per line: task | owner)">
+              <Section title="Edit requirements (one per line)">
+                <textarea value={draft.requirements} onChange={(e) => setDraft({ ...draft, requirements: e.target.value })} rows={3}
+                  style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit" }} />
+              </Section>
+              <Section title="Edit action items (task | owner | deadline)">
                 <textarea value={draft.actionItems} onChange={(e) => setDraft({ ...draft, actionItems: e.target.value })} rows={3}
                   style={{ width: "100%", padding: 10, borderRadius: 10, border: "1px solid var(--line)", fontSize: 13, fontFamily: "inherit" }} />
               </Section>
@@ -528,6 +517,20 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
               </ul>
             </Section>
           )}
+          {requirements.length > 0 && (
+            <Section title="Requirements">
+              <ul style={{ margin: 0, paddingLeft: 18, fontSize: 13, lineHeight: 1.7 }}>
+                {requirements.map((r, i) => <li key={i}>{r}</li>)}
+              </ul>
+            </Section>
+          )}
+          {tags.length > 0 && (
+            <Section title="Tags" icon={<TagIcon size={12} />}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {tags.map((t, i) => <span key={i} className="tag-pill" style={{ background: "var(--purple-soft)", color: "var(--purple)" }}>#{t.replace(/^#/, "")}</span>)}
+              </div>
+            </Section>
+          )}
           {actionItems.length > 0 && (
             <Section title="Action items" icon={<ListChecks size={12} />}>
               <div style={{ display: "flex", flexDirection: "column", gap: 7 }}>
@@ -537,7 +540,8 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
                       {a.done ? <CheckCircle2 size={16} /> : <Circle size={16} />}
                     </button>
                     <span style={{ textDecoration: a.done ? "line-through" : "none", color: a.done ? "var(--muted-soft)" : "var(--ink)" }}>
-                      {a.task}{a.owner ? <span style={{ color: "var(--muted-soft)" }}> — {a.owner}</span> : null}
+                      {a.task}
+                      {(a.owner || a.deadline) ? <span style={{ color: "var(--muted-soft)" }}> — {a.owner || "Unassigned"}{a.deadline ? ` · ${a.deadline}` : ""}</span> : null}
                     </span>
                   </div>
                 ))}
@@ -555,7 +559,7 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
             </button>
             {navigator.share && (
               <button
-                onClick={() => navigator.share({ title: `${projectName} — note`, text: noteAsText(note, projectName) })}
+                onClick={() => navigator.share({ title: `${projectName} — MOM`, text: noteAsText(note, projectName) })}
                 style={{ background: "none", border: "none", color: "var(--purple)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}
               >
                 <Share2 size={13} /> Share
@@ -565,7 +569,7 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
               <Copy size={13} /> Copy
             </button>
             <button onClick={() => downloadNoteAsText(note, projectName)} style={{ background: "none", border: "none", color: "var(--purple)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}>
-              <Download size={13} /> Download .txt
+              <Download size={13} /> Download MOM
             </button>
             <button onClick={onDelete} style={{ background: "none", border: "none", color: "var(--coral)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}>
               <Trash2 size={13} /> Delete
@@ -612,6 +616,7 @@ function RecorderModal({ projects, onClose, onSaved }) {
   const [seconds, setSeconds] = useState(0);
   const timerRef = useRef(null);
   const recognitionRef = useRef(null);
+  const recordingRef = useRef(false);
 
   useEffect(() => {
     if (recording) {
@@ -650,11 +655,20 @@ function RecorderModal({ projects, onClose, onSaved }) {
         setMicError("Microphone access was blocked. Type the discussion instead.");
         setMode("type");
       }
+      recordingRef.current = false;
       setRecording(false);
     };
-    rec.onend = () => setRecording(false);
+    rec.onend = () => {
+      // Browser SpeechRecognition can stop by itself during a long meeting.
+      // Restart it automatically while the user is still recording.
+      if (recordingRef.current) {
+        try { rec.start(); } catch {}
+      } else {
+        setRecording(false);
+      }
+    };
     recognitionRef.current = rec;
-    return () => { try { rec.stop(); } catch {} };
+    return () => { recordingRef.current = false; try { rec.stop(); } catch {} };
   }, [lang]);
 
   const onPhotoSelected = (e) => {
@@ -667,11 +681,12 @@ function RecorderModal({ projects, onClose, onSaved }) {
   const startRecording = () => {
     if (!recognitionRef.current) return;
     setSeconds(0);
-    try { recognitionRef.current.start(); setRecording(true); }
+    try { recordingRef.current = true; recognitionRef.current.start(); setRecording(true); }
     catch { setMicError("Couldn't start the microphone. Type the discussion instead."); setMode("type"); }
   };
   const stopRecording = () => {
     try { recognitionRef.current?.stop(); } catch {}
+    recordingRef.current = false;
     setRecording(false);
     setInterim("");
   };
@@ -695,12 +710,13 @@ function RecorderModal({ projects, onClose, onSaved }) {
         setUploadingPhoto(false);
       }
       const ai = await callSummarizeAPI(transcript.trim());
-      const actionItems = (ai.actionItems || []).map((a) => ({ ...a, done: false }));
+      const actionItems = (ai.actionItems || []).map((a) => ({ ...a, owner: a.owner || "", deadline: a.deadline || "", done: false }));
       const { data, error } = await supabase.from("notes").insert({
         project_id: projectId,
         transcript: transcript.trim(),
         summary: ai.summary || "",
         decisions: ai.decisions || [],
+        requirements: ai.requirements || [],
         action_items: actionItems,
         tags: ai.tags || [],
         attendees: attendees.trim(),
@@ -720,7 +736,7 @@ function RecorderModal({ projects, onClose, onSaved }) {
     <div className="modal-overlay" style={{ position: "fixed", inset: 0, background: "rgba(33,28,52,0.4)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: 20 }}>
       <div className="modal-card" style={{ background: "#fff", borderRadius: 26, width: "100%", maxWidth: 560, boxShadow: "0 24px 70px rgba(33,28,52,0.3)", overflow: "hidden" }}>
         <div style={{ padding: "18px 22px", borderBottom: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <span className="display" style={{ fontWeight: 800, fontSize: 16 }}>New discussion note</span>
+          <span className="display" style={{ fontWeight: 800, fontSize: 16 }}>New Meeting</span>
           <button onClick={onClose} style={{ background: "var(--purple-soft)", border: "none", color: "var(--purple)", borderRadius: 10, width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center" }}>
             <X size={16} />
           </button>
@@ -772,13 +788,13 @@ function RecorderModal({ projects, onClose, onSaved }) {
                 {recording ? <Square size={24} /> : <Mic size={26} />}
               </button>
               <span style={{ fontSize: 12, color: "var(--muted)", fontWeight: 600 }}>
-                {recording ? `Listening ${fmtTimer(seconds)} — tap to stop` : "Tap to start speaking"}
+                {recording ? `Listening ${fmtTimer(seconds)} — tap to stop` : "Tap to start meeting"}
               </span>
             </div>
           )}
 
           <div>
-            <label style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>TRANSCRIPT</label>
+            <label style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>LIVE TRANSCRIPT</label>
             <textarea value={transcript + (interim ? " " + interim : "")} onChange={(e) => setTranscript(e.target.value)}
               placeholder="What was discussed and decided..." rows={6}
               style={{ width: "100%", marginTop: 6, padding: 12, borderRadius: 14, border: "1px solid var(--line)", fontSize: 14, lineHeight: 1.6, resize: "vertical", fontFamily: "inherit" }} />
@@ -805,9 +821,9 @@ function RecorderModal({ projects, onClose, onSaved }) {
 
           <button onClick={saveNote} disabled={!canSave || status === "processing"} className="display"
             style={{ background: canSave ? "var(--purple-grad)" : "#e4e0f5", color: "#fff", border: "none", borderRadius: 14, padding: "13px 14px", fontSize: 14.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, boxShadow: canSave ? "0 10px 22px rgba(124,92,252,0.35)" : "none" }}>
-            {status === "processing" ? <><Loader2 size={16} className="spin" /> Summarizing with AI...</>
+            {status === "processing" ? <><Loader2 size={16} className="spin" /> Generating MOM with AI...</>
               : status === "done" ? <><CheckCircle2 size={16} /> Saved</>
-              : <><Sparkles size={16} /> Save & summarize</>}
+              : <><Sparkles size={16} /> Generate MOM</>}
           </button>
         </div>
       </div>
