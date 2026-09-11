@@ -268,6 +268,43 @@ export default function App() {
     if (openNoteId === id) setOpenNoteId(null);
   };
 
+  const deleteProject = async (id, name) => {
+    if (
+      !window.confirm(
+        `Delete "${name}"?\n\nThis will permanently delete the project and all MOMs inside it.`
+      )
+    ) {
+      return;
+    }
+
+    const { error: notesError } = await supabase
+      .from("notes")
+      .delete()
+      .eq("project_id", id);
+
+    if (notesError) {
+      window.alert(`Couldn't delete the project's MOMs: ${notesError.message}`);
+      return;
+    }
+
+    const { error: projectError } = await supabase
+      .from("projects")
+      .delete()
+      .eq("id", id);
+
+    if (projectError) {
+      window.alert(`Couldn't delete the project: ${projectError.message}`);
+      return;
+    }
+
+    setProjects((prev) => prev.filter((p) => p.id !== id));
+    setNotes((prev) => prev.filter((n) => n.project_id !== id));
+
+    if (activeProject === name) {
+      setActiveProject("All");
+    }
+  };
+
   const toggleActionItem = async (note, idx) => {
     const items = [...(note.action_items || [])];
 
@@ -499,21 +536,103 @@ export default function App() {
             const c = colorFor(p.name);
 
             return (
-              <SidebarItem
+              <div
                 key={p.id}
-                label={p.name}
-                count={
-                  notes.filter(
-                    (n) => n.project_id === p.id
-                  ).length
-                }
-                active={activeProject === p.name}
-                dotColor={c.fg}
-                onClick={() => {
-                  setActiveProject(p.name);
-                  setSidebarOpen(false);
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                  marginBottom: 2,
                 }}
-              />
+              >
+                <button
+                  onClick={() => {
+                    setActiveProject(p.name);
+                    setSidebarOpen(false);
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    padding: "9px 10px",
+                    borderRadius: 10,
+                    border: "none",
+                    background:
+                      activeProject === p.name
+                        ? "var(--purple-soft)"
+                        : "transparent",
+                    color:
+                      activeProject === p.name
+                        ? "var(--purple)"
+                        : "var(--ink)",
+                    fontSize: 13.5,
+                    fontWeight: activeProject === p.name ? 700 : 500,
+                    textAlign: "left",
+                    cursor: "pointer",
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 8,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: 7,
+                        height: 7,
+                        borderRadius: "50%",
+                        background: c.fg,
+                        flexShrink: 0,
+                      }}
+                    />
+                    {p.name}
+                  </span>
+
+                  <span
+                    style={{
+                      fontSize: 11,
+                      color: "var(--muted-soft)",
+                    }}
+                  >
+                    {notes.filter((n) => n.project_id === p.id).length}
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => deleteProject(p.id, p.name)}
+                  title={`Delete ${p.name}`}
+                  style={{
+                    width: 30,
+                    height: 30,
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    border: "none",
+                    background: "transparent",
+                    color: "var(--muted-soft)",
+                    borderRadius: 8,
+                    cursor: "pointer",
+                    flexShrink: 0,
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.color = "var(--coral)";
+                    e.currentTarget.style.background = "var(--coral-soft)";
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.color = "var(--muted-soft)";
+                    e.currentTarget.style.background = "transparent";
+                  }}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
             );
           })}
 
