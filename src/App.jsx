@@ -89,6 +89,11 @@ function noteAsText(note, projectName) {
     note.action_items.forEach((a) => lines.push(`- ${a.task}${a.owner ? ` (${a.owner})` : ""}`));
     lines.push("");
   }
+  if ((note.tags || []).length) {
+    lines.push("Tags:");
+    (note.tags || []).forEach((t) => lines.push(`#${String(t).replace(/^#/, "")}`));
+    lines.push("");
+  }
   lines.push("Full transcript:", note.transcript || "");
   return lines.filter((l) => l !== "").join("\n");
 }
@@ -106,6 +111,26 @@ function downloadNoteAsText(note, projectName) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+async function shareNote(note, projectName) {
+  const title = `${projectName} — MOM`;
+  const text = noteAsText(note, projectName);
+  if (navigator.share) {
+    try {
+      await navigator.share({ title, text });
+      return;
+    } catch (err) {
+      if (err?.name === "AbortError") return;
+    }
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    window.alert("MOM copied to clipboard. You can paste it into WhatsApp, email, or any chat.");
+  } catch {
+    window.prompt("Copy this MOM:", text);
+  }
+}
+
 
 async function callSummarizeAPI(transcript) {
   const res = await fetch("/api/summarize", {
@@ -557,14 +582,12 @@ function NoteCard({ note, projectName, isOpen, onToggle, onDelete, onToggleActio
             <button onClick={startEdit} style={{ background: "none", border: "none", color: "var(--purple)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}>
               <Pencil size={13} /> Edit
             </button>
-            {navigator.share && (
-              <button
-                onClick={() => navigator.share({ title: `${projectName} — MOM`, text: noteAsText(note, projectName) })}
-                style={{ background: "none", border: "none", color: "var(--purple)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}
-              >
-                <Share2 size={13} /> Share
-              </button>
-            )}
+            <button
+              onClick={() => shareNote(note, projectName)}
+              style={{ background: "none", border: "none", color: "var(--purple)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}
+            >
+              <Share2 size={13} /> Share MOM
+            </button>
             <button onClick={() => copyNoteAsText(note, projectName)} style={{ background: "none", border: "none", color: "var(--purple)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}>
               <Copy size={13} /> Copy
             </button>
@@ -617,6 +640,7 @@ function RecorderModal({ projects, onClose, onSaved }) {
   const timerRef = useRef(null);
   const recognitionRef = useRef(null);
   const recordingRef = useRef(false);
+  const transcriptRef = useRef("");
 
   useEffect(() => {
     if (recording) {
@@ -647,7 +671,13 @@ function RecorderModal({ projects, onClose, onSaved }) {
         if (e.results[i].isFinal) finalChunk += t + " ";
         else interimChunk += t;
       }
-      if (finalChunk) setTranscript((prev) => (prev + " " + finalChunk).trim());
+      if (finalChunk) {
+        setTranscript((prev) => {
+          const next = (prev + " " + finalChunk).trim();
+          transcriptRef.current = next;
+          return next;
+        });
+      }
       setInterim(interimChunk);
     };
     rec.onerror = (e) => {
@@ -685,10 +715,18 @@ function RecorderModal({ projects, onClose, onSaved }) {
     catch { setMicError("Couldn't start the microphone. Type the discussion instead."); setMode("type"); }
   };
   const stopRecording = () => {
-    try { recognitionRef.current?.stop(); } catch {}
+    // Preserve everything already transcribed, including the current interim phrase.
+    if (interim.trim()) {
+      setTranscript((prev) => {
+        const next = (prev + " " + interim).trim();
+        transcriptRef.current = next;
+        return next;
+      });
+    }
     recordingRef.current = false;
     setRecording(false);
     setInterim("");
+    try { recognitionRef.current?.stop(); } catch {}
   };
 
   const canSave = transcript.trim().length > 10 && projectId;
@@ -709,11 +747,12 @@ function RecorderModal({ projects, onClose, onSaved }) {
         }
         setUploadingPhoto(false);
       }
-      const ai = await callSummarizeAPI(transcript.trim());
+      const finalTranscript = (transcriptRef.current || transcript).trim();
+      const ai = await callSummarizeAPI(finalTranscript);
       const actionItems = (ai.actionItems || []).map((a) => ({ ...a, owner: a.owner || "", deadline: a.deadline || "", done: false }));
       const { data, error } = await supabase.from("notes").insert({
         project_id: projectId,
-        transcript: transcript.trim(),
+        transcript: finalTranscript,
         summary: ai.summary || "",
         decisions: ai.decisions || [],
         requirements: ai.requirements || [],
@@ -722,7 +761,12 @@ function RecorderModal({ projects, onClose, onSaved }) {
         attendees: attendees.trim(),
         image_url: imageUrl,
       }).select();
-      if (error) throw error;
+      if (error) {
+        if (/requirements.*schema cache|column .*requirements.*does not exist/i.test(error.message || "")) {
+          throw new Error("Supabase needs the MOM requirements column. Run SUPABASE-MOM-MIGRATION.sql once in Supabase → SQL Editor, then try again.");
+        }
+        throw error;
+      }
       onSaved(data[0]);
       setStatus("done");
       setTimeout(onClose, 500);
@@ -795,7 +839,7 @@ function RecorderModal({ projects, onClose, onSaved }) {
 
           <div>
             <label style={{ fontSize: 11.5, fontWeight: 700, color: "var(--muted)" }}>LIVE TRANSCRIPT</label>
-            <textarea value={transcript + (interim ? " " + interim : "")} onChange={(e) => setTranscript(e.target.value)}
+            <textarea value={transcript + (interim ? " " + interim : "")} onChange={(e) => { setTranscript(e.target.value); transcriptRef.current = e.target.value; }}
               placeholder="What was discussed and decided..." rows={6}
               style={{ width: "100%", marginTop: 6, padding: 12, borderRadius: 14, border: "1px solid var(--line)", fontSize: 14, lineHeight: 1.6, resize: "vertical", fontFamily: "inherit" }} />
           </div>
