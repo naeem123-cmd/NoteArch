@@ -32,6 +32,11 @@ import {
   Upload,
   Sun,
   Moon,
+  SlidersHorizontal,
+  FileDown,
+  CalendarDays,
+  CircleUserRound,
+  ShieldCheck,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -136,6 +141,17 @@ function downloadNoteAsText(note, projectName) {
   URL.revokeObjectURL(url);
 }
 
+function downloadNoteAsPdf(note, projectName) {
+  const safe = (v) => String(v || "").replace(/[&<>\"]/g, (m) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"
+  }[m]));
+  const bullets = (arr) => (arr || []).map((x) => `<li>${safe(typeof x === "string" ? x : x.task || "")}${typeof x === "object" && x.owner ? ` <span class="meta">(${safe(x.owner)})</span>` : ""}${typeof x === "object" && x.deadline ? ` <span class="meta">· ${safe(x.deadline)}</span>` : ""}</li>`).join("");
+  const html = `<!doctype html><html><head><title>${safe(projectName)} MOM</title><style>body{font-family:Arial,sans-serif;padding:42px;color:#222;line-height:1.55}h1{margin:0 0 6px;font-size:26px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin:26px 0 8px;color:#6b4ee8}ul{padding-left:20px}.meta{color:#777}.small{color:#777;font-size:12px}.box{background:#f7f5ff;padding:16px;border-radius:10px;white-space:pre-wrap}@media print{body{padding:20px}}</style></head><body><h1>${safe(projectName)} — Minutes of Meeting</h1><div class="small">${safe(new Date(note.created_at).toLocaleString("en-IN"))}${note.attendees ? ` · Attendees: ${safe(note.attendees)}` : ""}</div><h2>Summary</h2><div>${safe(note.summary)}</div>${(note.decisions||[]).length?`<h2>Decisions</h2><ul>${bullets(note.decisions)}</ul>`:""}${(note.requirements||[]).length?`<h2>Requirements</h2><ul>${bullets(note.requirements)}</ul>`:""}${(note.action_items||[]).length?`<h2>Action Items</h2><ul>${bullets(note.action_items)}</ul>`:""}${(note.tags||[]).length?`<h2>Tags</h2><div>${(note.tags||[]).map(t=>`#${safe(String(t).replace(/^#/,'') )}`).join(" &nbsp; ")}</div>`:""}<h2>Full Transcript</h2><div class="box">${safe(note.transcript)}</div><script>window.onload=()=>{window.print();setTimeout(()=>window.close(),500)}</script></body></html>`;
+  const w = window.open("", "_blank", "width=900,height=900");
+  if (!w) { window.alert("Please allow pop-ups to generate the PDF."); return; }
+  w.document.write(html); w.document.close();
+}
+
 async function shareNote(note, projectName) {
   const title = `${projectName} — MOM`;
   const text = noteAsText(note, projectName);
@@ -213,6 +229,15 @@ export default function App() {
     } catch {}
   }, [darkMode]);
 
+  const [sortOrder, setSortOrder] = useState("newest");
+  const [dateFilter, setDateFilter] = useState("all");
+  const [taskFilter, setTaskFilter] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const [showAccessManager, setShowAccessManager] = useState(false);
+  const [profiles, setProfiles] = useState([]);
+  const [profilesLoading, setProfilesLoading] = useState(false);
+  const [accessSaving, setAccessSaving] = useState(false);
+
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
       setUserEmail(data?.user?.email || "");
@@ -271,6 +296,27 @@ export default function App() {
   useEffect(() => {
     loadAll();
   }, [profileReady, isRestricted, assignedProjectId]);
+
+  const loadProfiles = async () => {
+    setProfilesLoading(true);
+    const { data, error } = await supabase.from("profiles").select("*");
+    setProfilesLoading(false);
+    if (error) { window.alert(`Couldn't load clients: ${error.message}`); return; }
+    setProfiles(data || []);
+  };
+
+  const openAccessManager = async () => {
+    setShowAccessManager(true);
+    await loadProfiles();
+  };
+
+  const assignClientProject = async (profileId, projectId) => {
+    setAccessSaving(true);
+    const { error } = await supabase.from("profiles").update({ project_id: projectId || null }).eq("id", profileId);
+    setAccessSaving(false);
+    if (error) { window.alert(`Couldn't update access: ${error.message}`); return; }
+    setProfiles(prev => prev.map(p => p.id === profileId ? { ...p, project_id: projectId || null } : p));
+  };
 
   const addProject = async () => {
     const name = newProjectInput.trim();
@@ -396,25 +442,26 @@ export default function App() {
     };
   }, [notes, projects]);
 
-  const filteredNotes = notes.filter((n) => {
-    const projName =
-      projects.find((p) => p.id === n.project_id)?.name || "";
-
-    const matchesProject =
-      activeProject === "All" || projName === activeProject;
-
+  const filteredNotes = useMemo(() => {
+    const now = new Date();
     const q = search.trim().toLowerCase();
-
-    const matchesSearch =
-      !q ||
-      (n.summary || "").toLowerCase().includes(q) ||
-      projName.toLowerCase().includes(q) ||
-      (n.tags || []).some((t) =>
-        t.toLowerCase().includes(q)
-      );
-
-    return matchesProject && matchesSearch;
-  });
+    const result = notes.filter((n) => {
+      const projName = projects.find((p) => p.id === n.project_id)?.name || "";
+      const matchesProject = activeProject === "All" || projName === activeProject;
+      const haystack = [
+        n.summary, n.transcript, ...(n.decisions || []), ...(n.requirements || []),
+        ...(n.tags || []), ...(n.action_items || []).map(a => `${a.task} ${a.owner || ""} ${a.deadline || ""}`), projName
+      ].join(" ").toLowerCase();
+      const matchesSearch = !q || haystack.includes(q);
+      const ageDays = (now - new Date(n.created_at)) / 86400000;
+      const matchesDate = dateFilter === "all" || (dateFilter === "7" && ageDays <= 7) || (dateFilter === "30" && ageDays <= 30);
+      const openCount = (n.action_items || []).filter(a => !a.done).length;
+      const doneCount = (n.action_items || []).filter(a => a.done).length;
+      const matchesTask = taskFilter === "all" || (taskFilter === "open" && openCount > 0) || (taskFilter === "done" && doneCount > 0);
+      return matchesProject && matchesSearch && matchesDate && matchesTask;
+    });
+    return result.sort((a,b) => sortOrder === "oldest" ? new Date(a.created_at)-new Date(b.created_at) : new Date(b.created_at)-new Date(a.created_at));
+  }, [notes, projects, activeProject, search, dateFilter, taskFilter, sortOrder]);
 
   const allTasks = useMemo(() => {
     const out = [];
@@ -596,11 +643,24 @@ export default function App() {
           }}
         >
           <SidebarItem
+            label="Dashboard"
+            count={stats.totalNotes}
+            active={tab === "dashboard"}
+            onClick={() => {
+              setTab("dashboard");
+              setActiveProject("All");
+              setSidebarOpen(false);
+            }}
+            dotColor="var(--purple)"
+          />
+
+          <SidebarItem
             label="All MOMs"
             count={notes.length}
             active={activeProject === "All"}
             onClick={() => {
               setActiveProject("All");
+              setTab("notes");
               setSidebarOpen(false);
             }}
           />
@@ -633,6 +693,7 @@ export default function App() {
                 <button
                   onClick={() => {
                     setActiveProject(p.name);
+                    setTab("notes");
                     setSidebarOpen(false);
                   }}
                   style={{
@@ -790,6 +851,15 @@ export default function App() {
           ) : null}
         </div>
 
+        {!isRestricted && (
+          <button
+            onClick={openAccessManager}
+            style={{ margin: "8px 16px 4px", width: "calc(100% - 32px)", display: "flex", alignItems: "center", gap: 7, padding: "9px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", fontSize: 12.5, fontWeight: 700, cursor: "pointer" }}
+          >
+            <ShieldCheck size={15} /> Client access
+          </button>
+        )}
+
         <div
           style={{
             padding: "12px 16px",
@@ -916,6 +986,14 @@ export default function App() {
           </button>
 
           <button
+            onClick={() => setShowFilters(v => !v)}
+            title="Filters"
+            style={{ width: 40, height: 40, borderRadius: 12, border: "1px solid var(--line)", background: "var(--surface)", color: "var(--ink)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, cursor: "pointer" }}
+          >
+            <SlidersHorizontal size={17} />
+          </button>
+
+          <button
             className="desktop-new-btn display"
             onClick={() => setShowRecorder(true)}
             style={{
@@ -938,6 +1016,15 @@ export default function App() {
             New Meeting
           </button>
         </div>
+
+        {showFilters && (
+          <div style={{ margin: "12px 24px 0", padding: 12, border: "1px solid var(--line)", borderRadius: 14, background: "var(--surface)", display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <select value={sortOrder} onChange={e => setSortOrder(e.target.value)} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-2)", color: "var(--ink)" }}><option value="newest">Newest first</option><option value="oldest">Oldest first</option></select>
+            <select value={dateFilter} onChange={e => setDateFilter(e.target.value)} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-2)", color: "var(--ink)" }}><option value="all">Any date</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
+            <select value={taskFilter} onChange={e => setTaskFilter(e.target.value)} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "var(--surface-2)", color: "var(--ink)" }}><option value="all">All task status</option><option value="open">Has open actions</option><option value="done">Has completed actions</option></select>
+            <button onClick={() => { setSearch(""); setSortOrder("newest"); setDateFilter("all"); setTaskFilter("all"); }} style={{ padding: "8px 10px", borderRadius: 10, border: "1px solid var(--line)", background: "transparent", color: "var(--muted)", fontWeight: 700 }}>Reset</button>
+          </div>
+        )}
 
         <div className="hero-card">
           <svg
@@ -1019,11 +1106,14 @@ export default function App() {
         </div>
 
         <div className="pill-tabs">
+          <button className={`pill ${tab === "dashboard" ? "active" : ""}`} onClick={() => setTab("dashboard")}>
+            Dashboard
+          </button>
           <button
             className={`pill ${
-              activeProject === "All" ? "active" : ""
+              activeProject === "All" && tab !== "dashboard" ? "active" : ""
             }`}
-            onClick={() => setActiveProject("All")}
+            onClick={() => { setActiveProject("All"); setTab("notes"); }}
           >
             All MOMs{" "}
             <span style={{ opacity: 0.6 }}>
@@ -1039,9 +1129,10 @@ export default function App() {
                   ? "active"
                   : ""
               }`}
-              onClick={() =>
-                setActiveProject(p.name)
-              }
+              onClick={() => {
+                setActiveProject(p.name);
+                setTab("notes");
+              }}
             >
               {p.name}{" "}
               <span style={{ opacity: 0.6 }}>
@@ -1097,7 +1188,9 @@ export default function App() {
             padding: "16px 24px 28px",
           }}
         >
-          {loading ? (
+          {tab === "dashboard" ? (
+            <ProjectDashboard projects={projects} notes={notes} activeProject={activeProject} />
+          ) : loading ? (
             <EmptyState
               icon={
                 <Loader2
@@ -1186,6 +1279,17 @@ export default function App() {
           </button>
         </div>
       </div>
+
+      {showAccessManager && (
+        <ClientAccessModal
+          projects={projects}
+          profiles={profiles}
+          loading={profilesLoading}
+          saving={accessSaving}
+          onClose={() => setShowAccessManager(false)}
+          onAssign={assignClientProject}
+        />
+      )}
 
       {showRecorder && (
         <RecorderModal
@@ -1969,25 +2073,17 @@ function NoteCard({
                           >
                             {a.task}
 
-                            {(
-                              a.owner ||
-                              a.deadline
-                            ) ? (
-                              <span
-                                style={{
-                                  color:
-                                    "var(--muted-soft)",
-                                }}
-                              >
-                                {" "}
-                                —{" "}
-                                {a.owner ||
-                                  "Unassigned"}
-                                {a.deadline
-                                  ? ` · ${a.deadline}`
-                                  : ""}
+                            {(a.owner || a.deadline) ? (
+                              <span style={{ color: "var(--muted-soft)" }}>
+                                {" "}— {a.owner || "Unassigned"}{a.deadline ? ` · ${a.deadline}` : ""}
                               </span>
                             ) : null}
+                            {a.deadline && !a.done ? (() => {
+                              const d = new Date(a.deadline);
+                              if (Number.isNaN(d.getTime())) return null;
+                              const overdue = d < new Date();
+                              return <span style={{ marginLeft: 7, fontSize: 10.5, fontWeight: 800, color: overdue ? "var(--coral)" : "var(--purple)" }}>{overdue ? "Overdue" : `Due ${d.toLocaleDateString("en-IN", { day: "2-digit", month: "short" })}`}</span>;
+                            })() : null}
                           </span>
                         </div>
                       )
@@ -2124,6 +2220,14 @@ function NoteCard({
                 </button>
 
                 <button
+                  onClick={() => downloadNoteAsPdf(note, projectName)}
+                  style={{ background: "none", border: "none", color: "var(--purple)", fontSize: 12.5, display: "flex", alignItems: "center", gap: 5, padding: 0, fontWeight: 600 }}
+                >
+                  <FileDown size={13} />
+                  PDF
+                </button>
+
+                <button
                   onClick={onDelete}
                   style={{
                     background: "none",
@@ -2189,6 +2293,40 @@ const LANGUAGES = [
     label: "हिन्दी",
   },
 ];
+
+function ProjectDashboard({ projects, notes, activeProject }) {
+  const visibleProjects = activeProject === "All" ? projects : projects.filter(p => p.name === activeProject);
+  const visibleNotes = activeProject === "All" ? notes : notes.filter(n => visibleProjects.some(p => p.id === n.project_id));
+  const totalActions = visibleNotes.reduce((s,n)=>s+(n.action_items||[]).length,0);
+  const openActions = visibleNotes.reduce((s,n)=>s+(n.action_items||[]).filter(a=>!a.done).length,0);
+  const doneActions = totalActions-openActions;
+  const projectRows = visibleProjects.map(p => {
+    const ns = visibleNotes.filter(n=>n.project_id===p.id);
+    const open = ns.reduce((s,n)=>s+(n.action_items||[]).filter(a=>!a.done).length,0);
+    return { ...p, meetings: ns.length, open };
+  });
+  return <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
+    <div><div style={{fontSize:22,fontWeight:800}}>Project dashboard</div><div style={{fontSize:12.5,color:"var(--muted)",marginTop:3}}>A quick view of meetings, decisions and follow-ups.</div></div>
+    <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
+      <StatCard label="Meetings" value={visibleNotes.length} accent="var(--purple)" />
+      <StatCard label="Open actions" value={openActions} accent="var(--coral)" />
+      <StatCard label="Completed actions" value={doneActions} accent="var(--green)" />
+      <StatCard label="Decisions" value={visibleNotes.reduce((s,n)=>s+(n.decisions||[]).length,0)} accent="var(--teal)" />
+    </div>
+    <div className="note-card"><div style={{fontWeight:800,marginBottom:10}}>Projects</div>{projectRows.length ? projectRows.map(p=><div key={p.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"11px 0",borderTop:"1px solid var(--line)"}}><div><div style={{fontWeight:700}}>{p.name}</div><div style={{fontSize:11.5,color:"var(--muted)"}}>{p.meetings} meetings</div></div><span style={{fontSize:11,fontWeight:800,color:p.open?"var(--coral)":"var(--green)"}}>{p.open} open</span></div>) : <div style={{color:"var(--muted)"}}>No projects yet.</div>}</div>
+  </div>;
+}
+
+function ClientAccessModal({ projects, profiles, loading, saving, onClose, onAssign }) {
+  const visible = (profiles || []).filter(p => p.id);
+  const label = p => p.email || p.name || p.full_name || p.display_name || p.id;
+  return <div className="modal-overlay" style={{position:"fixed",inset:0,background:"rgba(33,28,52,.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:80,padding:20}}>
+    <div className="modal-card" style={{width:"min(680px,100%)",maxHeight:"80vh",overflowY:"auto",background:"var(--surface)",border:"1px solid var(--line)",borderRadius:20,padding:20}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}><div><div style={{fontSize:18,fontWeight:800}}>Client access</div><div style={{fontSize:12,color:"var(--muted)",marginTop:3}}>Assign each client to one project. Empty means admin access.</div></div><button onClick={onClose} style={{border:"none",background:"transparent",color:"var(--muted)"}}><X size={18}/></button></div>
+      {loading ? <div style={{padding:30,textAlign:"center",color:"var(--muted)"}}>Loading clients...</div> : visible.length ? visible.map(p=><div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr 230px",gap:12,alignItems:"center",padding:"12px 0",borderTop:"1px solid var(--line)"}}><div style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{label(p)}</div><select disabled={saving} value={p.project_id || ""} onChange={e=>onAssign(p.id,e.target.value)} style={{padding:"9px 10px",borderRadius:10,border:"1px solid var(--line)",background:"var(--surface-2)",color:"var(--ink)"}}><option value="">Admin / All projects</option>{projects.map(pr=><option key={pr.id} value={pr.id}>{pr.name}</option>)}</select></div>) : <div style={{padding:20,color:"var(--muted)"}}>No profiles found.</div>}
+    </div>
+  </div>;
+}
 
 function RecorderModal({
   projects,
