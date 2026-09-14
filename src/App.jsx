@@ -2346,6 +2346,9 @@ function RecorderModal({
   const [transcript, setTranscript] =
     useState("");
 
+  const [interim, setInterim] =
+    useState("");
+
   const [micError, setMicError] =
     useState("");
 
@@ -2373,6 +2376,17 @@ function RecorderModal({
   const [uploadingAudio, setUploadingAudio] =
     useState(false);
 
+  const [recordedAudioBlob, setRecordedAudioBlob] =
+    useState(null);
+
+  const [recordedAudioMime, setRecordedAudioMime] =
+    useState("audio/webm");
+
+  const mediaRecorderRef = useRef(null);
+  const mediaStreamRef = useRef(null);
+  const audioChunksRef = useRef([]);
+  const recognitionStartingRef = useRef(false);
+
   const [uploadingPhoto, setUploadingPhoto] =
     useState(false);
 
@@ -2380,10 +2394,14 @@ function RecorderModal({
     useState(0);
 
   const timerRef = useRef(null);
-  const mediaRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
-  const recordingRef = useRef(false);
-  const transcriptRef = useRef("");
+  const recognitionRef =
+    useRef(null);
+
+  const recordingRef =
+    useRef(false);
+
+  const transcriptRef =
+    useRef("");
 
   useEffect(() => {
     if (recording) {
@@ -2415,20 +2433,73 @@ function RecorderModal({
     ).padStart(2, "0")}`;
 
   useEffect(() => {
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    const SR =
+      window.SpeechRecognition ||
+      window.webkitSpeechRecognition;
+
+    if (!SR) {
       setMicError(
-        "Live voice recording isn't supported in this browser. Please use Chrome/Edge or upload a recording instead."
+        "Live text preview is not supported in this browser. Your audio will still be recorded and transcribed after you stop."
       );
+      return;
     }
+
+    const rec = new SR();
+    rec.continuous = true;
+    rec.interimResults = true;
+    rec.lang = lang;
+
+    rec.onresult = (e) => {
+      let finalChunk = "";
+      let interimChunk = "";
+
+      for (let i = e.resultIndex; i < e.results.length; i++) {
+        const text = e.results[i][0]?.transcript || "";
+        if (e.results[i].isFinal) finalChunk += text + " ";
+        else interimChunk += text;
+      }
+
+      if (finalChunk.trim()) {
+        setTranscript((prev) => {
+          const next = `${prev} ${finalChunk}`.trim();
+          transcriptRef.current = next;
+          return next;
+        });
+      }
+      setInterim(interimChunk);
+    };
+
+    rec.onerror = (e) => {
+      if (e.error === "not-allowed" || e.error === "service-not-allowed") {
+        setMicError(
+          "Live text permission was blocked. Audio recording can still be used; final transcription will happen after you stop."
+        );
+      } else if (e.error === "no-speech") {
+        setMicError(
+          "No speech detected yet. Keep speaking; the audio is still being recorded."
+        );
+      }
+    };
+
+    rec.onend = () => {
+      recognitionStartingRef.current = false;
+      if (recordingRef.current) {
+        try {
+          recognitionStartingRef.current = true;
+          rec.start();
+        } catch {
+          recognitionStartingRef.current = false;
+        }
+      }
+    };
+
+    recognitionRef.current = rec;
 
     return () => {
       recordingRef.current = false;
-      try {
-        mediaRecorderRef.current?.stop();
-      } catch {}
-      mediaRecorderRef.current = null;
+      try { rec.stop(); } catch {}
     };
-  }, []);
+  }, [lang]);
 
   const onPhotoSelected = (e) => {
     const file =
@@ -2459,27 +2530,29 @@ function RecorderModal({
   };
 
   const startRecording = async () => {
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-      setMicError(
-        "Live voice recording isn't supported in this browser. Please use Chrome/Edge or upload a recording instead."
-      );
-      return;
-    }
+    if (recording) return;
+
+    setMicError("");
+    setErrorMsg("");
+    setTranscript("");
+    setInterim("");
+    transcriptRef.current = "";
+    setRecordedAudioBlob(null);
+    setRecordedAudioMime("audio/webm");
+    setSeconds(0);
+    audioChunksRef.current = [];
 
     try {
-      setMicError("");
-      setErrorMsg("");
-      setSeconds(0);
-      setAudioFile(null);
-      audioChunksRef.current = [];
-
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
           autoGainControl: true,
+          channelCount: 1,
         },
       });
+
+      mediaStreamRef.current = stream;
 
       const preferredTypes = [
         "audio/webm;codecs=opus",
@@ -2487,89 +2560,90 @@ function RecorderModal({
         "audio/mp4",
       ];
       const mimeType = preferredTypes.find((type) =>
-        MediaRecorder.isTypeSupported(type)
+        window.MediaRecorder?.isTypeSupported?.(type)
       ) || "";
 
       const recorder = new MediaRecorder(
         stream,
-        mimeType ? { mimeType } : undefined
+        mimeType ? { mimeType, audioBitsPerSecond: 64000 } : undefined
       );
 
       recorder.ondataavailable = (event) => {
-        if (event.data?.size) {
-          audioChunksRef.current.push(event.data);
-        }
-      };
-
-      recorder.onerror = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        recordingRef.current = false;
-        setRecording(false);
-        setMicError(
-          "The recording could not be completed. Please try again or upload a recording instead."
-        );
+        if (event.data?.size) audioChunksRef.current.push(event.data);
       };
 
       recorder.onstop = () => {
-        stream.getTracks().forEach((track) => track.stop());
-        const blobType = recorder.mimeType || mimeType || "audio/webm";
-        const blob = new Blob(audioChunksRef.current, { type: blobType });
-
-        if (blob.size > 20 * 1024 * 1024) {
-          setAudioFile(null);
-          setErrorMsg(
-            "This recording is larger than 20 MB. Please make a shorter recording or use Upload with a compressed file."
-          );
-          return;
-        }
-
-        const extension = blobType.includes("mp4") ? "m4a" : "webm";
-        const file = new File(
-          [blob],
-          `meeting-recording-${Date.now()}.${extension}`,
-          { type: blobType }
-        );
-
-        setAudioFile(file);
-        setErrorMsg("");
+        const type = recorder.mimeType || mimeType || "audio/webm";
+        const blob = new Blob(audioChunksRef.current, { type });
+        setRecordedAudioBlob(blob);
+        setRecordedAudioMime(type.split(";")[0]);
+        audioChunksRef.current = [];
       };
 
       mediaRecorderRef.current = recorder;
-      recordingRef.current = true;
       recorder.start(1000);
+
+      recordingRef.current = true;
       setRecording(true);
-    } catch (error) {
-      recordingRef.current = false;
-      setRecording(false);
+
+      if (recognitionRef.current) {
+        try {
+          recognitionStartingRef.current = true;
+          recognitionRef.current.start();
+        } catch {
+          recognitionStartingRef.current = false;
+        }
+      }
+    } catch (err) {
+      mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+      mediaStreamRef.current = null;
       setMicError(
-        error?.name === "NotAllowedError"
-          ? "Microphone access was blocked. Please allow microphone access and try again."
-          : "Couldn't start the microphone. Please try again or upload a recording instead."
+        err?.name === "NotAllowedError"
+          ? "Microphone permission was blocked. Please allow microphone access in the browser and try again."
+          : "Couldn't access the microphone. Please check your microphone and browser permissions."
       );
+      setRecording(false);
+      recordingRef.current = false;
     }
   };
 
   const stopRecording = () => {
+    if (!recordingRef.current) return;
+
     recordingRef.current = false;
     setRecording(false);
+    setInterim("");
 
-    try {
-      if (mediaRecorderRef.current?.state !== "inactive") {
-        mediaRecorderRef.current.stop();
-      }
-    } catch {
-      setMicError(
-        "The recording could not be stopped cleanly. Please try again."
-      );
+    try { recognitionRef.current?.stop(); } catch {}
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== "inactive") {
+      try { recorder.stop(); } catch {}
     }
+
+    mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+    mediaStreamRef.current = null;
   };
+
+  useEffect(() => {
+    return () => {
+      recordingRef.current = false;
+      try { recognitionRef.current?.stop(); } catch {}
+      try {
+        if (mediaRecorderRef.current?.state !== "inactive") {
+          mediaRecorderRef.current?.stop();
+        }
+      } catch {}
+      mediaStreamRef.current?.getTracks?.().forEach((track) => track.stop());
+    };
+  }, []);
 
   const hasText =
     (transcriptRef.current || transcript).trim().length > 10;
 
   const canSave =
     projectId &&
-    (hasText || audioFile);
+    (hasText || audioFile || recordedAudioBlob);
 
   const saveNote = async () => {
     if (!canSave) return;
@@ -2616,16 +2690,33 @@ function RecorderModal({
           transcript
         ).trim();
 
-      if (audioFile) {
+      const audioToProcess =
+        mode === "voice" && recordedAudioBlob
+          ? {
+              file: recordedAudioBlob,
+              mimeType: recordedAudioMime || recordedAudioBlob.type || "audio/webm",
+              name: `meeting-${Date.now()}.webm`,
+              isRecordedVoice: true,
+            }
+          : audioFile
+            ? {
+                file: audioFile,
+                mimeType: audioFile.type || "audio/mpeg",
+                name: audioFile.name,
+                isRecordedVoice: false,
+              }
+            : null;
+
+      if (audioToProcess) {
         setUploadingAudio(true);
 
-        const safeName = audioFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+        const safeName = audioToProcess.name.replace(/[^a-zA-Z0-9._-]/g, "-");
         const audioPath = `${Date.now()}-${safeName}`;
 
         const { error: audioUploadError } = await supabase.storage
           .from("note-audio")
-          .upload(audioPath, audioFile, {
-            contentType: audioFile.type || "audio/mpeg",
+          .upload(audioPath, audioToProcess.file, {
+            contentType: audioToProcess.mimeType,
             upsert: false,
           });
 
@@ -2651,7 +2742,7 @@ function RecorderModal({
             },
             body: JSON.stringify({
               url: signedData.signedUrl,
-              mimeType: audioFile.type || "audio/mpeg",
+              mimeType: audioToProcess.mimeType,
             }),
           });
 
@@ -2671,9 +2762,11 @@ function RecorderModal({
             throw new Error("Gemini could not find usable speech in this recording.");
           }
 
-          finalTranscript = [finalTranscript, audioTranscript]
-            .filter(Boolean)
-            .join("\n\n");
+          finalTranscript = audioToProcess.isRecordedVoice
+            ? audioTranscript
+            : [finalTranscript, audioTranscript]
+                .filter(Boolean)
+                .join("\n\n");
 
           setTranscript(finalTranscript);
           transcriptRef.current = finalTranscript;
@@ -3119,12 +3212,10 @@ function RecorderModal({
                 }}
               >
                 {recording
-                  ? `Recording ${fmtTimer(
-                      seconds
-                    )} — tap to stop`
-                  : audioFile
-                  ? "Recording ready — Generate MOM to transcribe"
-                  : "Tap to start meeting"}
+                  ? `Listening ${fmtTimer(seconds)} — live transcript + audio recording`
+                  : recordedAudioBlob
+                    ? "Recording captured — Generate MOM for accurate transcription"
+                    : "Tap to start meeting"}
               </span>
             </div>
           )}
@@ -3138,11 +3229,17 @@ function RecorderModal({
                   "var(--muted)",
               }}
             >
-              {mode === "upload" ? "ADDITIONAL NOTES (optional)" : mode === "voice" ? "MEETING NOTES (optional)" : "MEETING NOTES"}
+              {mode === "upload" ? "ADDITIONAL NOTES (optional)" : mode === "voice" ? "LIVE TRANSCRIPT / NOTES" : "NOTES"}
             </label>
 
             <textarea
-              value={transcript}
+              value={
+                transcript +
+                (interim
+                  ? " " +
+                    interim
+                  : "")
+              }
               onChange={(e) => {
                 setTranscript(
                   e.target.value
@@ -3154,8 +3251,6 @@ function RecorderModal({
               placeholder={
                 mode === "upload"
                   ? "Optional: paste any existing text or extra notes here..."
-                  : mode === "voice"
-                  ? "Optional: add anything important that the recording may not capture..."
                   : "What was discussed and decided..."
               }
               rows={6}
