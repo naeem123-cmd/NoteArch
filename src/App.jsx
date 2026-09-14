@@ -29,6 +29,7 @@ import {
   Pencil,
   Share2,
   LogOut,
+  Upload,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -194,6 +195,8 @@ export default function App() {
   const [tab, setTab] = useState("notes");
   const [userEmail, setUserEmail] = useState("");
   const [isRestricted, setIsRestricted] = useState(false);
+  const [assignedProjectId, setAssignedProjectId] = useState(null);
+  const [profileReady, setProfileReady] = useState(false);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
@@ -206,26 +209,39 @@ export default function App() {
           .eq("id", data.user.id)
           .single();
 
+        setAssignedProjectId(profile?.project_id || null);
         setIsRestricted(Boolean(profile?.project_id));
       }
+
+      setProfileReady(true);
     });
   }, []);
 
   const loadAll = async () => {
+    if (!profileReady) return;
+
     setLoading(true);
     setLoadError("");
+
+    let projectQuery = supabase
+      .from("projects")
+      .select("*")
+      .order("created_at", { ascending: true });
+
+    let notesQuery = supabase
+      .from("notes")
+      .select("*")
+      .order("created_at", { ascending: false });
+
+    if (isRestricted && assignedProjectId) {
+      projectQuery = projectQuery.eq("id", assignedProjectId);
+      notesQuery = notesQuery.eq("project_id", assignedProjectId);
+    }
 
     const [
       { data: proj, error: e1 },
       { data: nts, error: e2 },
-    ] = await Promise.all([
-      supabase.from("projects").select("*").order("created_at", {
-        ascending: true,
-      }),
-      supabase.from("notes").select("*").order("created_at", {
-        ascending: false,
-      }),
-    ]);
+    ] = await Promise.all([projectQuery, notesQuery]);
 
     if (e1 || e2) {
       setLoadError((e1 || e2).message);
@@ -239,7 +255,7 @@ export default function App() {
 
   useEffect(() => {
     loadAll();
-  }, []);
+  }, [profileReady, isRestricted, assignedProjectId]);
 
   const addProject = async () => {
     const name = newProjectInput.trim();
@@ -605,33 +621,35 @@ export default function App() {
                   </span>
                 </button>
 
-                <button
-                  onClick={() => deleteProject(p.id, p.name)}
-                  title={`Delete ${p.name}`}
-                  style={{
-                    width: 30,
-                    height: 30,
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    border: "none",
-                    background: "transparent",
-                    color: "var(--muted-soft)",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                    flexShrink: 0,
-                  }}
-                  onMouseEnter={(e) => {
-                    e.currentTarget.style.color = "var(--coral)";
-                    e.currentTarget.style.background = "var(--coral-soft)";
-                  }}
-                  onMouseLeave={(e) => {
-                    e.currentTarget.style.color = "var(--muted-soft)";
-                    e.currentTarget.style.background = "transparent";
-                  }}
-                >
-                  <Trash2 size={14} />
-                </button>
+                {!isRestricted && (
+                  <button
+                    onClick={() => deleteProject(p.id, p.name)}
+                    title={`Delete ${p.name}`}
+                    style={{
+                      width: 30,
+                      height: 30,
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      border: "none",
+                      background: "transparent",
+                      color: "var(--muted-soft)",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                    onMouseEnter={(e) => {
+                      e.currentTarget.style.color = "var(--coral)";
+                      e.currentTarget.style.background = "var(--coral-soft)";
+                    }}
+                    onMouseLeave={(e) => {
+                      e.currentTarget.style.color = "var(--muted-soft)";
+                      e.currentTarget.style.background = "transparent";
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                )}
               </div>
             );
           })}
@@ -2122,6 +2140,12 @@ function RecorderModal({
   const [photoPreview, setPhotoPreview] =
     useState("");
 
+  const [audioFile, setAudioFile] =
+    useState(null);
+
+  const [uploadingAudio, setUploadingAudio] =
+    useState(false);
+
   const [uploadingPhoto, setUploadingPhoto] =
     useState(false);
 
@@ -2289,6 +2313,21 @@ function RecorderModal({
     );
   };
 
+  const onAudioSelected = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (file.size > 20 * 1024 * 1024) {
+      setErrorMsg(
+        "Recording is larger than 20 MB. Please upload a smaller/compressed recording."
+      );
+      return;
+    }
+
+    setAudioFile(file);
+    setErrorMsg("");
+  };
+
   const startRecording = () => {
     if (
       !recognitionRef.current
@@ -2344,10 +2383,12 @@ function RecorderModal({
     } catch {}
   };
 
+  const hasText =
+    (transcriptRef.current || transcript).trim().length > 10;
+
   const canSave =
-    transcript.trim().length >
-      10 &&
-    projectId;
+    projectId &&
+    (hasText || audioFile);
 
   const saveNote = async () => {
     if (!canSave) return;
@@ -2388,11 +2429,80 @@ function RecorderModal({
         setUploadingPhoto(false);
       }
 
-      const finalTranscript =
+      let finalTranscript =
         (
           transcriptRef.current ||
           transcript
         ).trim();
+
+      if (audioFile) {
+        setUploadingAudio(true);
+
+        const safeName = audioFile.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+        const audioPath = `${Date.now()}-${safeName}`;
+
+        const { error: audioUploadError } = await supabase.storage
+          .from("note-audio")
+          .upload(audioPath, audioFile, {
+            contentType: audioFile.type || "audio/mpeg",
+            upsert: false,
+          });
+
+        if (audioUploadError) {
+          setUploadingAudio(false);
+          throw audioUploadError;
+        }
+
+        try {
+          const { data: signedData, error: signedError } =
+            await supabase.storage
+              .from("note-audio")
+              .createSignedUrl(audioPath, 600);
+
+          if (signedError || !signedData?.signedUrl) {
+            throw signedError || new Error("Couldn't create a secure audio URL.");
+          }
+
+          const transcribeRes = await fetch("/api/transcribe", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              url: signedData.signedUrl,
+              mimeType: audioFile.type || "audio/mpeg",
+            }),
+          });
+
+          const transcribeData = await transcribeRes.json().catch(() => ({}));
+
+          if (!transcribeRes.ok) {
+            throw new Error(
+              transcribeData.detail ||
+                transcribeData.error ||
+                `Audio transcription failed (${transcribeRes.status})`
+            );
+          }
+
+          const audioTranscript = (transcribeData.transcript || "").trim();
+
+          if (!audioTranscript) {
+            throw new Error("Gemini could not find usable speech in this recording.");
+          }
+
+          finalTranscript = [finalTranscript, audioTranscript]
+            .filter(Boolean)
+            .join("\n\n");
+
+          setTranscript(finalTranscript);
+          transcriptRef.current = finalTranscript;
+        } finally {
+          await supabase.storage
+            .from("note-audio")
+            .remove([audioPath]);
+          setUploadingAudio(false);
+        }
+      }
 
       const ai =
         await callSummarizeAPI(
@@ -2672,6 +2782,19 @@ function RecorderModal({
               }
               label="Type"
             />
+
+            <ModeTab
+              active={
+                mode === "upload"
+              }
+              onClick={() =>
+                setMode("upload")
+              }
+              icon={
+                <Upload size={13} />
+              }
+              label="Upload"
+            />
           </div>
 
           {mode === "voice" && (
@@ -2832,7 +2955,7 @@ function RecorderModal({
                   "var(--muted)",
               }}
             >
-              LIVE TRANSCRIPT
+              {mode === "upload" ? "ADDITIONAL NOTES (optional)" : "LIVE TRANSCRIPT / NOTES"}
             </label>
 
             <textarea
@@ -2851,7 +2974,11 @@ function RecorderModal({
                 transcriptRef.current =
                   e.target.value;
               }}
-              placeholder="What was discussed and decided..."
+              placeholder={
+                mode === "upload"
+                  ? "Optional: paste any existing text or extra notes here..."
+                  : "What was discussed and decided..."
+              }
               rows={6}
               style={{
                 width: "100%",
@@ -2869,6 +2996,98 @@ function RecorderModal({
               }}
             />
           </div>
+
+          {mode === "upload" && (
+            <div>
+              <label
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 700,
+                  color: "var(--muted)",
+                }}
+              >
+                MEETING RECORDING
+              </label>
+
+              <div
+                style={{
+                  marginTop: 6,
+                  padding: 14,
+                  border: "1px dashed var(--line)",
+                  borderRadius: 14,
+                  background: "#faf9ff",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                }}
+              >
+                <div style={{ minWidth: 0 }}>
+                  <div
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 700,
+                      overflow: "hidden",
+                      textOverflow: "ellipsis",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {audioFile ? audioFile.name : "Upload an existing meeting recording"}
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11.5,
+                      color: "var(--muted)",
+                      marginTop: 3,
+                    }}
+                  >
+                    MP3, M4A, WAV, OGG, AAC, FLAC or WebM · max 20 MB
+                  </div>
+                </div>
+
+                <label
+                  style={{
+                    flexShrink: 0,
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 6,
+                    padding: "9px 13px",
+                    borderRadius: 11,
+                    background: "var(--purple-soft)",
+                    color: "var(--purple)",
+                    fontSize: 12.5,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  <Upload size={14} />
+                  Choose file
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={onAudioSelected}
+                    style={{ display: "none" }}
+                  />
+                </label>
+              </div>
+
+              {audioFile && (
+                <button
+                  onClick={() => setAudioFile(null)}
+                  style={{
+                    marginTop: 7,
+                    fontSize: 12,
+                    color: "var(--coral)",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                  }}
+                >
+                  Remove recording
+                </button>
+              )}
+            </div>
+          )}
 
           <div>
             <label
@@ -3022,7 +3241,7 @@ function RecorderModal({
                   size={16}
                   className="spin"
                 />
-                Generating MOM with AI...
+                {uploadingAudio ? "Transcribing recording..." : "Generating MOM with AI..."}
               </>
             ) : status ===
               "done" ? (
