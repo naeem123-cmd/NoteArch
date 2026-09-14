@@ -299,7 +299,7 @@ export default function App() {
 
   const loadProfiles = async () => {
     setProfilesLoading(true);
-    const { data, error } = await supabase.rpc("note_arch_client_profiles");
+    const { data, error } = await supabase.from("profiles").select("*");
     setProfilesLoading(false);
     if (error) { window.alert(`Couldn't load clients: ${error.message}`); return; }
     setProfiles(data || []);
@@ -1284,6 +1284,7 @@ export default function App() {
         <ClientAccessModal
           projects={projects}
           profiles={profiles}
+          currentUserEmail={userEmail}
           loading={profilesLoading}
           saving={accessSaving}
           onClose={() => setShowAccessManager(false)}
@@ -2317,14 +2318,13 @@ function ProjectDashboard({ projects, notes, activeProject }) {
   </div>;
 }
 
-function ClientAccessModal({ projects, profiles, loading, saving, onClose, onAssign }) {
-  const visible = (profiles || []).filter(p => p.id);
-  const label = p => p.email || p.name || p.full_name || p.display_name || "Client";
-  const sublabel = p => p.email ? (p.name || p.full_name || p.display_name || "Client account") : "Client account";
+function ClientAccessModal({ projects, profiles, currentUserEmail, loading, saving, onClose, onAssign }) {
+  const visible = (profiles || []).filter(p => p.id && (!currentUserEmail || p.email !== currentUserEmail));
+  const label = p => p.email || p.name || p.full_name || p.display_name || p.id;
   return <div className="modal-overlay" style={{position:"fixed",inset:0,background:"rgba(33,28,52,.4)",display:"flex",alignItems:"center",justifyContent:"center",zIndex:80,padding:20}}>
     <div className="modal-card" style={{width:"min(680px,100%)",maxHeight:"80vh",overflowY:"auto",background:"var(--surface)",border:"1px solid var(--line)",borderRadius:20,padding:20}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:14}}><div><div style={{fontSize:18,fontWeight:800}}>Client access</div><div style={{fontSize:12,color:"var(--muted)",marginTop:3}}>Assign each client to one project. Empty means admin access.</div></div><button onClick={onClose} style={{border:"none",background:"transparent",color:"var(--muted)"}}><X size={18}/></button></div>
-      {loading ? <div style={{padding:30,textAlign:"center",color:"var(--muted)"}}>Loading clients...</div> : visible.length ? visible.map(p=><div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr 230px",gap:12,alignItems:"center",padding:"12px 0",borderTop:"1px solid var(--line)"}}><div style={{minWidth:0}}><div style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{label(p)}</div><div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>{sublabel(p)}</div></div><select disabled={saving} value={p.project_id || ""} onChange={e=>onAssign(p.id,e.target.value)} style={{padding:"9px 10px",borderRadius:10,border:"1px solid var(--line)",background:"var(--surface-2)",color:"var(--ink)"}}><option value="">Admin / All projects</option>{projects.map(pr=><option key={pr.id} value={pr.id}>{pr.name}</option>)}</select></div>) : <div style={{padding:20,color:"var(--muted)"}}>No profiles found.</div>}
+      {loading ? <div style={{padding:30,textAlign:"center",color:"var(--muted)"}}>Loading clients...</div> : visible.length ? visible.map(p=><div key={p.id} style={{display:"grid",gridTemplateColumns:"1fr 230px",gap:12,alignItems:"center",padding:"12px 0",borderTop:"1px solid var(--line)"}}><div style={{fontSize:13,fontWeight:700,overflow:"hidden",textOverflow:"ellipsis"}}>{label(p)}</div><select disabled={saving} value={p.project_id || ""} onChange={e=>onAssign(p.id,e.target.value)} style={{padding:"9px 10px",borderRadius:10,border:"1px solid var(--line)",background:"var(--surface-2)",color:"var(--ink)"}}><option value="">Admin / All projects</option>{projects.map(pr=><option key={pr.id} value={pr.id}>{pr.name}</option>)}</select></div>) : <div style={{padding:20,color:"var(--muted)"}}>No client profiles found.</div>}
     </div>
   </div>;
 }
