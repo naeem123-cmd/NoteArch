@@ -30,6 +30,8 @@ import {
   Share2,
   LogOut,
   Upload,
+  Sun,
+  Moon,
 } from "lucide-react";
 import { supabase, supabaseConfigured } from "./supabaseClient";
 
@@ -197,6 +199,19 @@ export default function App() {
   const [isRestricted, setIsRestricted] = useState(false);
   const [assignedProjectId, setAssignedProjectId] = useState(null);
   const [profileReady, setProfileReady] = useState(false);
+  const [darkMode, setDarkMode] = useState(() => {
+    try {
+      return localStorage.getItem("noteArchTheme") === "dark";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem("noteArchTheme", darkMode ? "dark" : "light");
+    } catch {}
+  }, [darkMode]);
 
   useEffect(() => {
     supabase.auth.getUser().then(async ({ data }) => {
@@ -425,7 +440,61 @@ export default function App() {
   }, [notes, projects]);
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${darkMode ? "theme-dark" : ""}`}>
+      <style>{`
+        .app-shell.theme-dark {
+          --ink: #f4f1ff;
+          --muted: #aaa4bd;
+          --muted-soft: #77718d;
+          --line: #302c3e;
+          --surface: #17151e;
+          --surface-2: #201d29;
+          --page: #100f15;
+          --purple-soft: #29213f;
+          --coral-soft: #3b2527;
+          --teal-soft: #1c3534;
+          --yellow-soft: #3a3020;
+          --green-soft: #1e3428;
+        }
+        .app-shell.theme-dark,
+        .app-shell.theme-dark .main-col {
+          background: var(--page) !important;
+          color: var(--ink) !important;
+        }
+        .app-shell.theme-dark .sidebar,
+        .app-shell.theme-dark .topbar,
+        .app-shell.theme-dark .card,
+        .app-shell.theme-dark .note-card,
+        .app-shell.theme-dark .modal-card,
+        .app-shell.theme-dark .search-box {
+          background: var(--surface) !important;
+          color: var(--ink) !important;
+          border-color: var(--line) !important;
+        }
+        .app-shell.theme-dark .sidebar {
+          border-color: var(--line) !important;
+        }
+        .app-shell.theme-dark input,
+        .app-shell.theme-dark textarea,
+        .app-shell.theme-dark select {
+          color: var(--ink) !important;
+          background: var(--surface-2) !important;
+          border-color: var(--line) !important;
+        }
+        .app-shell.theme-dark input::placeholder,
+        .app-shell.theme-dark textarea::placeholder {
+          color: var(--muted-soft) !important;
+        }
+        .app-shell.theme-dark button:not(.theme-toggle) {
+          border-color: var(--line);
+        }
+        .app-shell.theme-dark .hero-card {
+          border-color: transparent !important;
+        }
+        .app-shell.theme-dark hr {
+          border-color: var(--line) !important;
+        }
+      `}</style>
       <div
         className={`sidebar-backdrop ${
           sidebarOpen ? "open" : ""
@@ -823,6 +892,28 @@ export default function App() {
               }}
             />
           </div>
+
+          <button
+            onClick={() => setDarkMode((v) => !v)}
+            className="theme-toggle"
+            title={darkMode ? "Switch to day mode" : "Switch to night mode"}
+            aria-label={darkMode ? "Switch to day mode" : "Switch to night mode"}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 12,
+              border: "1px solid var(--line)",
+              background: darkMode ? "#252130" : "#fff",
+              color: darkMode ? "#f4c95d" : "var(--ink)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              flexShrink: 0,
+              cursor: "pointer",
+            }}
+          >
+            {darkMode ? <Sun size={17} /> : <Moon size={17} />}
+          </button>
 
           <button
             className="desktop-new-btn display"
