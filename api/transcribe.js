@@ -3,7 +3,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const { url, mimeType } = req.body || {};
+  const { url, mimeType, language } = req.body || {};
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -59,7 +59,10 @@ export default async function handler(req, res) {
       });
     }
 
-    const contentLength = Number(audioResponse.headers.get("content-length") || 0);
+    const contentLength = Number(
+      audioResponse.headers.get("content-length") || 0
+    );
+
     if (contentLength > 20 * 1024 * 1024) {
       return res.status(413).json({
         error: "This recording is larger than 20 MB. Please upload a smaller/compressed recording.",
@@ -79,6 +82,13 @@ export default async function handler(req, res) {
       audioResponse.headers.get("content-type") ||
       "audio/mpeg";
 
+    const languageHint =
+      language === "hi-IN"
+        ? "The speaker is primarily speaking Hindi, but may mix English terms (Hinglish)."
+        : language === "en-IN"
+        ? "The speaker is primarily speaking Indian English, but may mix Hindi terms (Hinglish)."
+        : "The meeting may be in English, Hindi, Hinglish, or mixed Hindi + English.";
+
     const response = await fetch(
       "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent",
       {
@@ -93,16 +103,7 @@ export default async function handler(req, res) {
               role: "user",
               parts: [
                 {
-                  text: `Transcribe this complete meeting recording accurately.
-
-The meeting may be in English, Hindi, Hinglish, or mixed Hindi + English.
-
-Rules:
-1. Do not summarize yet. Return the complete useful speech as text.
-2. Preserve important names, numbers, dimensions, materials, colours, dates, costs, decisions, requirements and responsibilities.
-3. Do not invent speech that is not present.
-4. Keep the transcript readable.
-5. Return only the transcript text.`,
+                  text: `Transcribe this complete architecture/interior/site/client meeting recording accurately.\n\n${languageHint}\n\nRules:\n1. Do not summarize yet. Return the complete useful speech as text.\n2. Preserve important names, people, companies, room names, dimensions, quantities, materials, colours, dates, costs, measurements, decisions, requirements and responsibilities.\n3. Keep numbers and units exactly as spoken whenever possible (for example 100 mm, 9 feet, 2.5 lakh).\n4. Do not invent or fill gaps with guesses. If a word is genuinely unclear, use [unclear] instead of making up a word.\n5. Keep speaker statements in natural readable paragraphs.\n6. Ignore obvious background noise and do not describe non-speech sounds unless they affect the meaning.\n7. Return only the transcript text, with no summary or commentary.`,
                 },
                 {
                   inlineData: {
