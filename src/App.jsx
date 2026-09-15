@@ -145,8 +145,93 @@ function downloadNoteAsPdf(note, projectName) {
   const safe = (v) => String(v || "").replace(/[&<>\"]/g, (m) => ({
     "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"
   }[m]));
-  const bullets = (arr) => (arr || []).map((x) => `<li>${safe(typeof x === "string" ? x : x.task || "")}${typeof x === "object" && x.owner ? ` <span class="meta">(${safe(x.owner)})</span>` : ""}${typeof x === "object" && x.deadline ? ` <span class="meta">· ${safe(x.deadline)}</span>` : ""}</li>`).join("");
-  const html = `<!doctype html><html><head><title>${safe(projectName)} MOM</title><style>body{font-family:Arial,sans-serif;padding:42px;color:#222;line-height:1.55}h1{margin:0 0 6px;font-size:26px}h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;margin:26px 0 8px;color:#6b4ee8}ul{padding-left:20px}.meta{color:#777}.small{color:#777;font-size:12px}.box{background:#f7f5ff;padding:16px;border-radius:10px;white-space:pre-wrap}@media print{body{padding:20px}}</style></head><body><h1>${safe(projectName)} — Minutes of Meeting</h1><div class="small">${safe(new Date(note.created_at).toLocaleString("en-IN"))}${note.attendees ? ` · Attendees: ${safe(note.attendees)}` : ""}</div><h2>Summary</h2><div>${safe(note.summary)}</div>${(note.decisions||[]).length?`<h2>Decisions</h2><ul>${bullets(note.decisions)}</ul>`:""}${(note.requirements||[]).length?`<h2>Requirements</h2><ul>${bullets(note.requirements)}</ul>`:""}${(note.action_items||[]).length?`<h2>Action Items</h2><ul>${bullets(note.action_items)}</ul>`:""}${(note.tags||[]).length?`<h2>Tags</h2><div>${(note.tags||[]).map(t=>`#${safe(String(t).replace(/^#/,'') )}`).join(" &nbsp; ")}</div>`:""}<h2>Full Transcript</h2><div class="box">${safe(note.transcript)}</div><script>window.onload=()=>{window.print();setTimeout(()=>window.close(),500)}</script></body></html>`;
+
+  const bullets = (arr) => (arr || []).map((x) =>
+    `<li>${safe(typeof x === "string" ? x : x.task || "")}${typeof x === "object" && x.owner ? ` <span class="meta">(${safe(x.owner)})</span>` : ""}${typeof x === "object" && x.deadline ? ` <span class="meta">· ${safe(x.deadline)}</span>` : ""}</li>`
+  ).join("");
+
+  // PDF-only metadata. These fields are read when available, without changing
+  // the existing meeting form or stored data structure.
+  const clientName = note.client_name || note.clientName || note.client || "";
+  const architectName = note.architect_name || note.architectName || note.architect || "";
+  const designerName = note.designer_name || note.designerName || note.designer || "";
+  const meetingDateTime = new Date(note.created_at).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  const metaItem = (label, value) => `
+    <div class="meta-item">
+      <div class="meta-label">${safe(label)}</div>
+      <div class="meta-value">${safe(value || "—")}</div>
+    </div>`;
+
+  const html = `<!doctype html>
+<html>
+<head>
+  <title>${safe(projectName)} MOM</title>
+  <style>
+    @page { size: A4; margin: 18mm 16mm 18mm; }
+    * { box-sizing: border-box; }
+    body { font-family: Arial, Helvetica, sans-serif; padding: 0; color: #202124; line-height: 1.55; background: #fff; }
+    .header { display:flex; align-items:center; justify-content:space-between; padding-bottom:18px; border-bottom:2px solid #eadfca; }
+    .brand { display:flex; align-items:center; gap:10px; }
+    .brand-mark { width:38px; height:38px; border:2px solid #b58a3b; border-radius:11px; display:flex; align-items:center; justify-content:center; color:#b58a3b; font-weight:900; font-size:21px; font-family:Georgia, serif; }
+    .brand-name { font-family:Georgia, serif; font-size:23px; font-weight:700; letter-spacing:-.02em; color:#222; }
+    .brand-name span { color:#b58a3b; }
+    .doc-type { font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:#8a8a8a; }
+    h1 { margin:22px 0 4px; font-size:25px; color:#222; }
+    .project { font-size:13px; color:#666; margin-bottom:18px; }
+    .meta-grid { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; margin:0 0 22px; }
+    .meta-item { border:1px solid #e8e4dc; border-radius:9px; padding:10px 12px; background:#fcfbf8; }
+    .meta-label { font-size:9px; text-transform:uppercase; letter-spacing:.1em; color:#888; font-weight:800; margin-bottom:3px; }
+    .meta-value { font-size:12.5px; font-weight:700; color:#2d2d2d; }
+    h2 { font-size:12px; text-transform:uppercase; letter-spacing:.09em; margin:24px 0 8px; color:#8a6728; }
+    ul { padding-left:20px; margin-top:6px; }
+    li { margin:5px 0; }
+    .meta { color:#777; }
+    .summary { font-size:13px; }
+    .tags { font-size:12px; color:#666; }
+    .footer { margin-top:30px; padding-top:10px; border-top:1px solid #e8e4dc; color:#999; font-size:9px; text-align:center; }
+    @media print { body { padding:0; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <div class="brand">
+      <div class="brand-mark">R</div>
+      <div class="brand-name"><span>Re</span>Arch</div>
+    </div>
+    <div class="doc-type">Minutes of Meeting</div>
+  </div>
+
+  <h1>${safe(projectName)} — Minutes of Meeting</h1>
+  <div class="project">Professional meeting record</div>
+
+  <div class="meta-grid">
+    ${metaItem("Client Name", clientName)}
+    ${metaItem("Architect Name", architectName)}
+    ${metaItem("Designer Name", designerName)}
+    ${metaItem("Date & Time", meetingDateTime)}
+  </div>
+
+  <h2>Summary</h2>
+  <div class="summary">${safe(note.summary)}</div>
+
+  ${(note.decisions || []).length ? `<h2>Decisions</h2><ul>${bullets(note.decisions)}</ul>` : ""}
+  ${(note.requirements || []).length ? `<h2>Requirements</h2><ul>${bullets(note.requirements)}</ul>` : ""}
+  ${(note.action_items || []).length ? `<h2>Action Items</h2><ul>${bullets(note.action_items)}</ul>` : ""}
+  ${(note.tags || []).length ? `<h2>Tags</h2><div class="tags">${(note.tags || []).map(t => `#${safe(String(t).replace(/^#/, ""))}`).join(" &nbsp; ")}</div>` : ""}
+
+  <div class="footer">ReArch · Meeting documentation</div>
+
+  <script>window.onload=()=>{window.print();setTimeout(()=>window.close(),500)}</script>
+</body>
+</html>`;
+
   const w = window.open("", "_blank", "width=900,height=900");
   if (!w) { window.alert("Please allow pop-ups to generate the PDF."); return; }
   w.document.write(html); w.document.close();
