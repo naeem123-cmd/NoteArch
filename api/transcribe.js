@@ -60,17 +60,17 @@ export default async function handler(req, res) {
     }
 
     const contentLength = Number(audioResponse.headers.get("content-length") || 0);
-    if (contentLength > 20 * 1024 * 1024) {
+    if (contentLength > 50 * 1024 * 1024) {
       return res.status(413).json({
-        error: "This recording is larger than 20 MB. Please upload a smaller/compressed recording.",
+        error: "This recording is larger than 50 MB. Please upload a smaller/compressed recording.",
       });
     }
 
     const buffer = Buffer.from(await audioResponse.arrayBuffer());
 
-    if (buffer.length > 20 * 1024 * 1024) {
+    if (buffer.length > 50 * 1024 * 1024) {
       return res.status(413).json({
-        error: "This recording is larger than 20 MB. Please upload a smaller/compressed recording.",
+        error: "This recording is larger than 50 MB. Please upload a smaller/compressed recording.",
       });
     }
 
