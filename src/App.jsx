@@ -3470,7 +3470,7 @@ function RecorderModal({
                   Choose file
                   <input
                     type="file"
-                    accept="audio/*"
+                    accept="audio/*,video/mp4"
                     onChange={onAudioSelected}
                     style={{ display: "none" }}
                   />
