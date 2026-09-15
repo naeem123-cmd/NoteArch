@@ -2626,9 +2626,9 @@ function RecorderModal({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (file.size > 20 * 1024 * 1024) {
+    if (file.size > 50 * 1024 * 1024) {
       setErrorMsg(
-        "Recording is larger than 20 MB. Please upload a smaller/compressed recording."
+        "Recording is larger than 50 MB. Please upload a smaller/compressed recording."
       );
       return;
     }
@@ -3447,7 +3447,7 @@ function RecorderModal({
                       marginTop: 3,
                     }}
                   >
-                    MP3, M4A, WAV, OGG, AAC, FLAC or WebM · max 20 MB
+                    MP3, M4A, WAV, OGG, AAC, FLAC or WebM · max 50 MB
                   </div>
                 </div>
 
