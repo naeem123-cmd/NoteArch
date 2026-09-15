@@ -42,6 +42,7 @@ export default async function handler(req, res) {
     "audio/x-m4a",
     "audio/webm",
     "audio/opus",
+    "video/mp4",
   ]);
 
   if (mimeType && !allowedMimeTypes.has(mimeType)) {
@@ -93,7 +94,7 @@ export default async function handler(req, res) {
               role: "user",
               parts: [
                 {
-                  text: `Transcribe this complete meeting recording accurately.
+                  text: `Transcribe this complete meeting recording accurately. If the uploaded file is an MP4 video, use its audio track for transcription.
 
 The meeting may be in English, Hindi, Hinglish, or mixed Hindi + English.
 
