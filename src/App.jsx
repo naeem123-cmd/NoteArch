@@ -79,6 +79,9 @@ function noteAsText(note, projectName) {
   const lines = [
     `${projectName} — ${new Date(note.created_at).toLocaleString("en-IN")}`,
     note.attendees ? `Attendees: ${note.attendees}` : "",
+    note.client_name ? `Client Name: ${note.client_name}` : "",
+    note.architect_name ? `Architect Name: ${note.architect_name}` : "",
+    note.designer_name ? `Designer Name: ${note.designer_name}` : "",
     "",
     "Summary:",
     note.summary || "",
@@ -178,10 +181,8 @@ function downloadNoteAsPdf(note, projectName) {
     * { box-sizing: border-box; }
     body { font-family: Arial, Helvetica, sans-serif; padding: 0; color: #202124; line-height: 1.55; background: #fff; }
     .header { display:flex; align-items:center; justify-content:space-between; padding-bottom:18px; border-bottom:2px solid #eadfca; }
-    .brand { display:flex; align-items:center; gap:10px; }
-    .brand-mark { width:38px; height:38px; border:2px solid #b58a3b; border-radius:11px; display:flex; align-items:center; justify-content:center; color:#b58a3b; font-weight:900; font-size:21px; font-family:Georgia, serif; }
-    .brand-name { font-family:Georgia, serif; font-size:23px; font-weight:700; letter-spacing:-.02em; color:#222; }
-    .brand-name span { color:#b58a3b; }
+    .brand { display:flex; align-items:center; }
+    .brand-logo { width:150px; max-height:62px; object-fit:contain; object-position:left center; }
     .doc-type { font-size:10px; font-weight:800; letter-spacing:.14em; text-transform:uppercase; color:#8a8a8a; }
     h1 { margin:22px 0 4px; font-size:25px; color:#222; }
     .project { font-size:13px; color:#666; margin-bottom:18px; }
@@ -202,8 +203,7 @@ function downloadNoteAsPdf(note, projectName) {
 <body>
   <div class="header">
     <div class="brand">
-      <div class="brand-mark">R</div>
-      <div class="brand-name"><span>Re</span>Arch</div>
+      <img class="brand-logo" src="${window.location.origin}/rearch-logo.png" alt="ReArch Developers" />
     </div>
     <div class="doc-type">Minutes of Meeting</div>
   </div>
@@ -1605,6 +1605,9 @@ function NoteCard({
 
     setDraft({
       summary: note.summary || "",
+      clientName: note.client_name || note.clientName || "",
+      architectName: note.architect_name || note.architectName || "",
+      designerName: note.designer_name || note.designerName || "",
       decisions: (note.decisions || []).join(
         "\n"
       ),
@@ -1669,6 +1672,9 @@ function NoteCard({
 
     await onSaveEdit(note.id, {
       summary: draft.summary,
+      client_name: draft.clientName.trim(),
+      architect_name: draft.architectName.trim(),
+      designer_name: draft.designerName.trim(),
       decisions: newDecisions,
       requirements: newRequirements,
       action_items: newActionItems,
@@ -1857,6 +1863,14 @@ function NoteCard({
 
           {editing ? (
             <>
+              <Section title="Meeting participants">
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+                  <input value={draft.clientName} onChange={(e)=>setDraft({...draft,clientName:e.target.value})} placeholder="Client name(s), comma separated" style={{width:"100%",padding:10,borderRadius:10,border:"1px solid var(--line)",fontSize:13,fontFamily:"inherit"}} />
+                  <input value={draft.architectName} onChange={(e)=>setDraft({...draft,architectName:e.target.value})} placeholder="Architect name(s), comma separated" style={{width:"100%",padding:10,borderRadius:10,border:"1px solid var(--line)",fontSize:13,fontFamily:"inherit"}} />
+                  <input value={draft.designerName} onChange={(e)=>setDraft({...draft,designerName:e.target.value})} placeholder="Designer name(s), comma separated" style={{width:"100%",padding:10,borderRadius:10,border:"1px solid var(--line)",fontSize:13,fontFamily:"inherit"}} />
+                </div>
+              </Section>
+
               <Section title="Edit summary">
                 <textarea
                   value={draft.summary}
@@ -2446,6 +2460,15 @@ function RecorderModal({
   const [attendees, setAttendees] =
     useState("");
 
+  const [clientName, setClientName] =
+    useState("");
+
+  const [architectName, setArchitectName] =
+    useState("");
+
+  const [designerName, setDesignerName] =
+    useState("");
+
   const [lang, setLang] =
     useState("en-IN");
 
@@ -2902,6 +2925,12 @@ function RecorderModal({
             ai.tags || [],
           attendees:
             attendees.trim(),
+          client_name:
+            clientName.trim(),
+          architect_name:
+            architectName.trim(),
+          designer_name:
+            designerName.trim(),
           image_url:
             imageUrl,
         })
@@ -3108,6 +3137,24 @@ function RecorderModal({
                 fontSize: 13.5,
               }}
             />
+          </div>
+
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+            <div>
+              <label style={{fontSize:11.5,fontWeight:700,color:"var(--muted)"}}>CLIENT NAME(S)</label>
+              <input value={clientName} onChange={(e)=>setClientName(e.target.value)} placeholder="e.g. Rahul, Priya" style={{width:"100%",marginTop:6,padding:"10px 12px",borderRadius:12,border:"1px solid var(--line)",fontSize:13.5}} />
+              <div style={{fontSize:10.5,color:"var(--muted-soft)",marginTop:4}}>Separate multiple names with commas.</div>
+            </div>
+            <div>
+              <label style={{fontSize:11.5,fontWeight:700,color:"var(--muted)"}}>ARCHITECT NAME(S)</label>
+              <input value={architectName} onChange={(e)=>setArchitectName(e.target.value)} placeholder="e.g. Ar. Amit, Ar. Neha" style={{width:"100%",marginTop:6,padding:"10px 12px",borderRadius:12,border:"1px solid var(--line)",fontSize:13.5}} />
+              <div style={{fontSize:10.5,color:"var(--muted-soft)",marginTop:4}}>Separate multiple names with commas.</div>
+            </div>
+            <div>
+              <label style={{fontSize:11.5,fontWeight:700,color:"var(--muted)"}}>DESIGNER NAME(S)</label>
+              <input value={designerName} onChange={(e)=>setDesignerName(e.target.value)} placeholder="e.g. Rohit, Ananya" style={{width:"100%",marginTop:6,padding:"10px 12px",borderRadius:12,border:"1px solid var(--line)",fontSize:13.5}} />
+              <div style={{fontSize:10.5,color:"var(--muted-soft)",marginTop:4}}>Separate multiple names with commas.</div>
+            </div>
           </div>
 
           <div
