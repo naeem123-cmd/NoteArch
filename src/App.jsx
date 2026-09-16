@@ -182,7 +182,7 @@ function downloadNoteAsPdf(note, projectName) {
   const html = `<!doctype html>
 <html>
 <head>
-  <title>${safe(projectName)} MOM</title>
+  <title>Minutes of Meeting</title>
   <style>
     @page { size: A4; margin: 18mm 16mm 18mm; }
     * { box-sizing: border-box; }
