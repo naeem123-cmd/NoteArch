@@ -48,6 +48,13 @@ const fmtDate = (iso) =>
     minute: "2-digit",
   });
 
+const toDateTimeLocalValue = (value) => {
+  const d = value ? new Date(value) : new Date();
+  if (Number.isNaN(d.getTime())) return "";
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
 const isThisWeek = (iso) => {
   const diff = (new Date() - new Date(iso)) / (1000 * 60 * 60 * 24);
   return diff <= 7;
@@ -77,7 +84,7 @@ const colorFor = (str) => {
 
 function noteAsText(note, projectName) {
   const lines = [
-    `${projectName} — ${new Date(note.created_at).toLocaleString("en-IN")}`,
+    `${projectName} — ${new Date(note.meeting_at || note.created_at).toLocaleString("en-IN")}`,
     note.attendees ? `Attendees: ${note.attendees}` : "",
     note.client_name ? `Client Name: ${note.client_name}` : "",
     note.architect_name ? `Architect Name: ${note.architect_name}` : "",
@@ -158,7 +165,7 @@ function downloadNoteAsPdf(note, projectName) {
   const clientName = note.client_name || note.clientName || note.client || "";
   const architectName = note.architect_name || note.architectName || note.architect || "";
   const designerName = note.designer_name || note.designerName || note.designer || "";
-  const meetingDateTime = new Date(note.created_at).toLocaleString("en-IN", {
+  const meetingDateTime = new Date(note.meeting_at || note.created_at).toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -1608,6 +1615,7 @@ function NoteCard({
       clientName: note.client_name || note.clientName || "",
       architectName: note.architect_name || note.architectName || "",
       designerName: note.designer_name || note.designerName || "",
+      meetingAt: toDateTimeLocalValue(note.meeting_at || note.created_at),
       decisions: (note.decisions || []).join(
         "\n"
       ),
@@ -1675,6 +1683,7 @@ function NoteCard({
       client_name: draft.clientName.trim(),
       architect_name: draft.architectName.trim(),
       designer_name: draft.designerName.trim(),
+      meeting_at: draft.meetingAt ? new Date(draft.meetingAt).toISOString() : note.created_at,
       decisions: newDecisions,
       requirements: newRequirements,
       action_items: newActionItems,
@@ -1864,10 +1873,11 @@ function NoteCard({
           {editing ? (
             <>
               <Section title="Meeting participants">
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(2,minmax(0,1fr))",gap:10}}>
                   <input value={draft.clientName} onChange={(e)=>setDraft({...draft,clientName:e.target.value})} placeholder="Client name(s), comma separated" style={{width:"100%",padding:10,borderRadius:10,border:"1px solid var(--line)",fontSize:13,fontFamily:"inherit"}} />
                   <input value={draft.architectName} onChange={(e)=>setDraft({...draft,architectName:e.target.value})} placeholder="Architect name(s), comma separated" style={{width:"100%",padding:10,borderRadius:10,border:"1px solid var(--line)",fontSize:13,fontFamily:"inherit"}} />
                   <input value={draft.designerName} onChange={(e)=>setDraft({...draft,designerName:e.target.value})} placeholder="Designer name(s), comma separated" style={{width:"100%",padding:10,borderRadius:10,border:"1px solid var(--line)",fontSize:13,fontFamily:"inherit"}} />
+                  <input type="datetime-local" value={draft.meetingAt} onChange={(e)=>setDraft({...draft,meetingAt:e.target.value})} aria-label="Meeting date and time" style={{width:"100%",padding:10,borderRadius:10,border:"1px solid var(--line)",fontSize:13,fontFamily:"inherit"}} />
                 </div>
               </Section>
 
@@ -2478,8 +2488,11 @@ function RecorderModal({
   const [photoPreview, setPhotoPreview] =
     useState("");
 
-  const [audioFile, setAudioFile] =
-    useState(null);
+  const [audioFiles, setAudioFiles] =
+    useState([]);
+
+  const [meetingDateTime, setMeetingDateTime] =
+    useState(() => toDateTimeLocalValue(new Date()));
 
   const [uploadingAudio, setUploadingAudio] =
     useState(false);
@@ -2626,18 +2639,22 @@ function RecorderModal({
   };
 
   const onAudioSelected = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const files = Array.from(e.target.files || []);
+    if (!files.length) return;
 
-    if (file.size > 50 * 1024 * 1024) {
-      setErrorMsg(
-        "Recording is larger than 50 MB. Please upload a smaller/compressed recording."
-      );
+    const oversized = files.find((file) => file.size > 50 * 1024 * 1024);
+    if (oversized) {
+      setErrorMsg(`\"${oversized.name}\" is larger than 50 MB. Please upload a smaller/compressed recording.`);
       return;
     }
 
-    setAudioFile(file);
+    setAudioFiles((prev) => {
+      const existing = new Set(prev.map((file) => `${file.name}|${file.size}|${file.lastModified}`));
+      const additions = files.filter((file) => !existing.has(`${file.name}|${file.size}|${file.lastModified}`));
+      return [...prev, ...additions];
+    });
     setErrorMsg("");
+    e.target.value = "";
   };
 
   const startRecording = async () => {
@@ -2754,7 +2771,7 @@ function RecorderModal({
 
   const canSave =
     projectId &&
-    (hasText || audioFile || recordedAudioBlob);
+    (hasText || audioFiles.length > 0 || recordedAudioBlob);
 
   const saveNote = async () => {
     if (!canSave || saveInProgressRef.current) return;
@@ -2804,88 +2821,85 @@ function RecorderModal({
 
       const audioToProcess =
         mode === "voice" && recordedAudioBlob
-          ? {
+          ? [{
               file: recordedAudioBlob,
               mimeType: recordedAudioMime || recordedAudioBlob.type || "audio/webm",
               name: `meeting-${Date.now()}.webm`,
               isRecordedVoice: true,
-            }
-          : audioFile
-            ? {
-                file: audioFile,
-                mimeType: audioFile.type || "audio/mpeg",
-                name: audioFile.name,
-                isRecordedVoice: false,
-              }
-            : null;
+            }]
+          : audioFiles.map((file) => ({
+              file,
+              mimeType: file.type || "audio/mpeg",
+              name: file.name,
+              isRecordedVoice: false,
+            }));
 
-      if (audioToProcess) {
+      if (audioToProcess.length) {
         setUploadingAudio(true);
 
-        const safeName = audioToProcess.name.replace(/[^a-zA-Z0-9._-]/g, "-");
-        const audioPath = `${Date.now()}-${safeName}`;
-
-        const { error: audioUploadError } = await supabase.storage
-          .from("note-audio")
-          .upload(audioPath, audioToProcess.file, {
-            contentType: audioToProcess.mimeType,
-            upsert: false,
-          });
-
-        if (audioUploadError) {
-          setUploadingAudio(false);
-          throw audioUploadError;
-        }
-
         try {
-          const { data: signedData, error: signedError } =
-            await supabase.storage
+          for (let index = 0; index < audioToProcess.length; index += 1) {
+            const item = audioToProcess[index];
+            const safeName = item.name.replace(/[^a-zA-Z0-9._-]/g, "-");
+            const audioPath = `${Date.now()}-${index}-${safeName}`;
+
+            const { error: audioUploadError } = await supabase.storage
               .from("note-audio")
-              .createSignedUrl(audioPath, 600);
+              .upload(audioPath, item.file, {
+                contentType: item.mimeType,
+                upsert: false,
+              });
 
-          if (signedError || !signedData?.signedUrl) {
-            throw signedError || new Error("Couldn't create a secure audio URL.");
+            if (audioUploadError) throw audioUploadError;
+
+            try {
+              const { data: signedData, error: signedError } =
+                await supabase.storage
+                  .from("note-audio")
+                  .createSignedUrl(audioPath, 600);
+
+              if (signedError || !signedData?.signedUrl) {
+                throw signedError || new Error("Couldn't create a secure audio URL.");
+              }
+
+              const transcribeRes = await fetch("/api/transcribe", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  url: signedData.signedUrl,
+                  mimeType: item.mimeType,
+                }),
+              });
+
+              const transcribeData = await transcribeRes.json().catch(() => ({}));
+
+              if (!transcribeRes.ok) {
+                throw new Error(
+                  transcribeData.detail ||
+                    transcribeData.error ||
+                    `Audio transcription failed (${transcribeRes.status})`
+                );
+              }
+
+              const audioTranscript = (transcribeData.transcript || "").trim();
+
+              if (!audioTranscript) {
+                throw new Error(`Gemini could not find usable speech in recording ${index + 1}.`);
+              }
+
+              finalTranscript = item.isRecordedVoice
+                ? audioTranscript
+                : [finalTranscript, `Recording ${index + 1}:`, audioTranscript]
+                    .filter(Boolean)
+                    .join("\n\n");
+
+              setTranscript(finalTranscript);
+              transcriptRef.current = finalTranscript;
+            } finally {
+              await supabase.storage.from("note-audio").remove([audioPath]);
+            }
           }
-
-          const transcribeRes = await fetch("/api/transcribe", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              url: signedData.signedUrl,
-              mimeType: audioToProcess.mimeType,
-            }),
-          });
-
-          const transcribeData = await transcribeRes.json().catch(() => ({}));
-
-          if (!transcribeRes.ok) {
-            throw new Error(
-              transcribeData.detail ||
-                transcribeData.error ||
-                `Audio transcription failed (${transcribeRes.status})`
-            );
-          }
-
-          const audioTranscript = (transcribeData.transcript || "").trim();
-
-          if (!audioTranscript) {
-            throw new Error("Gemini could not find usable speech in this recording.");
-          }
-
-          finalTranscript = audioToProcess.isRecordedVoice
-            ? audioTranscript
-            : [finalTranscript, audioTranscript]
-                .filter(Boolean)
-                .join("\n\n");
-
-          setTranscript(finalTranscript);
-          transcriptRef.current = finalTranscript;
         } finally {
-          await supabase.storage
-            .from("note-audio")
-            .remove([audioPath]);
           setUploadingAudio(false);
         }
       }
@@ -2935,6 +2949,8 @@ function RecorderModal({
             architectName.trim(),
           designer_name:
             designerName.trim(),
+          meeting_at:
+            meetingDateTime ? new Date(meetingDateTime).toISOString() : new Date().toISOString(),
           image_url:
             imageUrl,
         })
@@ -3145,7 +3161,7 @@ function RecorderModal({
             />
           </div>
 
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,minmax(0,1fr))",gap:10}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(4,minmax(0,1fr))",gap:10}}>
             <div>
               <label style={{fontSize:11.5,fontWeight:700,color:"var(--muted)"}}>CLIENT NAME(S)</label>
               <input value={clientName} onChange={(e)=>setClientName(e.target.value)} placeholder="e.g. Rahul, Priya" style={{width:"100%",marginTop:6,padding:"10px 12px",borderRadius:12,border:"1px solid var(--line)",fontSize:13.5}} />
@@ -3160,6 +3176,11 @@ function RecorderModal({
               <label style={{fontSize:11.5,fontWeight:700,color:"var(--muted)"}}>DESIGNER NAME(S)</label>
               <input value={designerName} onChange={(e)=>setDesignerName(e.target.value)} placeholder="e.g. Rohit, Ananya" style={{width:"100%",marginTop:6,padding:"10px 12px",borderRadius:12,border:"1px solid var(--line)",fontSize:13.5}} />
               <div style={{fontSize:10.5,color:"var(--muted-soft)",marginTop:4}}>Separate multiple names with commas.</div>
+            </div>
+            <div>
+              <label style={{fontSize:11.5,fontWeight:700,color:"var(--muted)"}}>DATE & TIME</label>
+              <input type="datetime-local" value={meetingDateTime} onChange={(e)=>setMeetingDateTime(e.target.value)} style={{width:"100%",marginTop:6,padding:"10px 12px",borderRadius:12,border:"1px solid var(--line)",fontSize:13.5,fontFamily:"inherit"}} />
+              <div style={{fontSize:10.5,color:"var(--muted-soft)",marginTop:4}}>You can change this before saving.</div>
             </div>
           </div>
 
@@ -3444,7 +3465,9 @@ function RecorderModal({
                       whiteSpace: "nowrap",
                     }}
                   >
-                    {audioFile ? audioFile.name : "Upload an existing meeting recording"}
+                    {audioFiles.length
+                      ? `${audioFiles.length} recording${audioFiles.length > 1 ? "s" : ""} selected`
+                      : "Upload one or more meeting recordings"}
                   </div>
                   <div
                     style={{
@@ -3453,7 +3476,7 @@ function RecorderModal({
                       marginTop: 3,
                     }}
                   >
-                    MP3, M4A, WAV, OGG, AAC, FLAC or WebM · max 50 MB
+                    MP3, M4A, WAV, OGG, AAC, FLAC, WebM or MP4 · max 50 MB each
                   </div>
                 </div>
 
@@ -3477,15 +3500,16 @@ function RecorderModal({
                   <input
                     type="file"
                     accept="audio/*,video/mp4"
+                    multiple
                     onChange={onAudioSelected}
                     style={{ display: "none" }}
                   />
                 </label>
               </div>
 
-              {audioFile && (
+              {audioFiles.length > 0 && (
                 <button
-                  onClick={() => setAudioFile(null)}
+                  onClick={() => setAudioFiles([])}
                   style={{
                     marginTop: 7,
                     fontSize: 12,
@@ -3495,8 +3519,18 @@ function RecorderModal({
                     cursor: "pointer",
                   }}
                 >
-                  Remove recording
+                  Remove recordings
                 </button>
+              )}
+
+              {audioFiles.length > 0 && (
+                <div style={{ marginTop: 8, display: "flex", flexDirection: "column", gap: 5 }}>
+                  {audioFiles.map((file, index) => (
+                    <div key={`${file.name}-${index}`} style={{ fontSize: 11.5, color: "var(--muted)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {index + 1}. {file.name}
+                    </div>
+                  ))}
+                </div>
               )}
             </div>
           )}
