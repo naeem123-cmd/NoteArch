@@ -2495,6 +2495,9 @@ function RecorderModal({
   const audioChunksRef = useRef([]);
   const recognitionStartingRef = useRef(false);
 
+  // Prevent accidental duplicate Generate MOM submissions.
+  const saveInProgressRef = useRef(false);
+
   const [uploadingPhoto, setUploadingPhoto] =
     useState(false);
 
@@ -2754,8 +2757,9 @@ function RecorderModal({
     (hasText || audioFile || recordedAudioBlob);
 
   const saveNote = async () => {
-    if (!canSave) return;
+    if (!canSave || saveInProgressRef.current) return;
 
+    saveInProgressRef.current = true;
     setStatus("processing");
     setErrorMsg("");
 
@@ -2965,6 +2969,8 @@ function RecorderModal({
         err.message ||
           "Couldn't save that note. Try again."
       );
+    } finally {
+      saveInProgressRef.current = false;
     }
   };
 
